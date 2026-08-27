@@ -1,0 +1,7 @@
+{
+  "name": "@trisoul/dsh-guard",
+  "version": "0.0.1",
+  "description": "TriSoul 安全门：tools/pre-execute 危险命令 deny（共识≠授权的执法层）",
+  "type": "module",
+  "main": "src/index.mjs"
+}

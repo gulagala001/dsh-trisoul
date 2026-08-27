@@ -1,0 +1,10 @@
+{
+  "name": "@trisoul/dsh-consensus",
+  "version": "0.0.1",
+  "description": "TriSoul 多体共识插件：拦截 dsh 主循环的 llm/stream，N 路盲写→匿名两票制表决（候选+融合）→胜者整份放行 / 融合胜出则全员见稿重写再表决",
+  "type": "module",
+  "main": "src/index.mjs",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": "*"
+  }
+}

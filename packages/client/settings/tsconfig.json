@@ -1,0 +1,7 @@
+{
+  "extends": "../tsconfig.base.client.json",
+  "compilerOptions": {
+    "rootDir": ".."
+  },
+  "include": ["src/**/*", "../css-modules.d.ts"]
+}

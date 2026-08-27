@@ -1,0 +1,10 @@
+{
+  "name": "@trisoul/dsh-canvas",
+  "version": "0.1.0",
+  "description": "TriSoul 画布编排器（M5 + C）：agent/pre-step 步边界检查表面上下文膨胀，圈定可手术区间交给手术刀（ctx.compaction.compactRegion）；会话内状态区（恒真区只增不改 / 状态区原地改写，LLM 小作业提炼 + ctx.inject 注入，ctx.bail('trisoul/canvas-state')）；手术后探针题验收（trisoul/canvas phase=probe）",
+  "type": "module",
+  "main": "src/index.mjs",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

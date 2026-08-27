@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TriSoul AI 监控面板</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #0F1117;
+      color: #E5E7EB;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .header {
+      max-width: 1400px;
+      margin: 0 auto 24px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid #1E222E;
+    }
+
+    .title {
+      font-size: 24px;
+      font-weight: 600;
+      color: #F9FAFB;
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: #6B7280;
+    }
+
+    .grid {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+    }
+
+    .card {
+      background: #171A23;
+      border: 1px solid #1E222E;
+      border-radius: 8px;
+      padding: 20px;
+      transition: border-color 0.2s;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .indicator {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #F9FAFB;
+    }
+
+    .stats {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid #1E222E;
+    }
+
+    .stat-row:last-child {
+      border-bottom: none;
+    }
+
+    .stat-label {
+      font-size: 13px;
+      color: #9CA3AF;
+    }
+
+    .stat-value {
+      font-size: 14px;
+      font-weight: 600;
+      color: #E5E7EB;
+      font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #6B7280;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1 class="title">TriSoul AI 监控面板</h1>
+    <div class="subtitle">5 个后台 AI 实时运行状态</div>
+  </div>
+
+  <div id="loading" class="loading">加载中...</div>
+  <div id="grid" class="grid" style="display: none;"></div>
+
+  <script>
+    const AI_INFO = {
+      'trisoul-surgeon': { name: '手术刀', color: '#22D3EE' },
+      'trisoul-memory': { name: '记忆消化', color: '#FBBF24' },
+      'trisoul-canvas': { name: '画布编排', color: '#5B8CFF' },
+      'soul-A': { name: '谨慎审查者 (0.3)', color: '#F87171' },
+      'soul-B': { name: '务实工程师 (0.7)', color: '#34D399' },
+      'soul-C': { name: '边界猎人 (1.0)', color: '#A78BFA' },
+    }
+
+    function formatNumber(n) {
+      if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`
+      if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
+      return n.toString()
+    }
+
+    function formatTime(timestamp) {
+      if (!timestamp) return '未运行'
+      const seconds = Math.floor((Date.now() - timestamp) / 1000)
+      if (seconds < 60) return `${seconds}秒前`
+      if (seconds < 3600) return `${Math.floor(seconds / 60)}分钟前`
+      return `${Math.floor(seconds / 3600)}小时前`
+    }
+
+    async function loadStats() {
+      try {
+        const response = await fetch('/api/monitor/stats')
+        if (!response.ok) throw new Error('加载失败')
+        const data = await response.json()
+        renderStats(data.stats)
+      } catch (e) {
+        console.error('Failed to load stats:', e)
+      }
+    }
+
+    function renderStats(stats) {
+      const grid = document.getElementById('grid')
+      const loading = document.getElementById('loading')
+
+      grid.innerHTML = ''
+
+      Object.entries(AI_INFO).forEach(([id, info]) => {
+        const s = stats[id] || { cache: 0, context: 0, input: 0, output: 0, lastCall: null }
+        const isActive = s.lastCall && (Date.now() - s.lastCall < 30000)
+
+        const card = document.createElement('div')
+        card.className = 'card'
+        card.innerHTML = `
+          <div class="card-header">
+            <div class="indicator" style="background: ${isActive ? info.color : '#374151'}"></div>
+            <h3 class="card-title">${info.name}</h3>
+          </div>
+          <div class="stats">
+            <div class="stat-row">
+              <span class="stat-label">缓存命中</span>
+              <span class="stat-value">${formatNumber(s.cache)} tok</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label">上下文</span>
+              <span class="stat-value">${formatNumber(s.context)} tok</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label">输入</span>
+              <span class="stat-value">${formatNumber(s.input)} tok</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label">输出</span>
+              <span class="stat-value">${formatNumber(s.output)} tok</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label">最后调用</span>
+              <span class="stat-value">${formatTime(s.lastCall)}</span>
+            </div>
+          </div>
+        `
+
+        grid.appendChild(card)
+      })
+
+      loading.style.display = 'none'
+      grid.style.display = 'grid'
+    }
+
+    // 首次加载
+    loadStats()
+
+    // 每 5 秒刷新一次
+    setInterval(loadStats, 5000)
+  </script>
+</body>
+</html>

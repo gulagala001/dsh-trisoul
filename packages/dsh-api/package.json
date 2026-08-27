@@ -1,0 +1,16 @@
+{
+  "name": "@trisoul/dsh-api",
+  "version": "0.1.0",
+  "description": "TriSoul 中枢 API：模型配置（统一/精细两模式，settings 命名空间）+ 后台 AI 监控统计 + /trisoul/api/* 路由",
+  "type": "module",
+  "main": "src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "3.18.1"
+  },
+  "files": [
+    "src"
+  ]
+}

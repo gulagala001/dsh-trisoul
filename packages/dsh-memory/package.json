@@ -1,0 +1,10 @@
+{
+  "name": "@trisoul/dsh-memory",
+  "version": "0.1.0",
+  "description": "TriSoul 记忆中枢插件（多层记忆）：global/cross/project 三层隔离 + 覆盖链就地更新 + 预压缩稿 + 事件游标续传；消化/整理/recall(含回捞原文)/手术备料四作业",
+  "type": "module",
+  "main": "src/index.mjs",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
