@@ -40,7 +40,8 @@
         model: deepseek-v4-flash
         storePath: __DATA_DIR__/trisoul-memory.json
 
-# 三体共识（三个灵魂同模型不同温度；人设 = 做事取舍：求稳 / 求成 / 求全，无人格无口头禅）
+# 三魂共识（三个灵魂同模型不同温度）。下面的 persona 是 off 档兜底人设——
+# 三官档位 ≠ off 时（见 trisoul-api 的 base.effort）会被对应官的补偿人设全文覆盖。
 - insert:
     - id: trisoul-consensus
       name: '@trisoul/dsh-consensus'
@@ -70,6 +71,29 @@
                 persona: '做事以把事办成为先：走主流程、用最直接的做法，能用就交付，不为边角情况拖住主线；存在多个可行方案时选步骤最少、依赖最少的那条直接落地。' }
             - { name: C, title: 求全, temperature: 0.9,
                 persona: '做事以周全为先：同样完成任务，但主动覆盖异常、边界和请求里没说透的隐含要求，宁可多想一步；存在多个可行方案时优先探索与最直接做法不同的那条并说明理由。' }
+          # 三魂 effort 档位（off / light / standard / max）——按位映射上面三个灵魂 A/B/C。
+          # ≠ off 时，该魂的 persona 被对应「官」的补偿人设全文覆盖（上面 title/persona 退为 off 档兜底），
+          # 并解锁一件专属取证工具（专属排他，盲写内层可调）：
+          #   align   对齐官 · 做什么   → task_original（取回用户逐字原话，对抗压缩后的转述漂移）
+          #   erudite 博识官 · 凭什么做 → web_search / web_fetch（把「我记得」逼成有出处的事实）
+          #   empiric 实证官 · 做对没有 → run_verify（node --check / tsc --noEmit，只读检查不执行你的代码）
+          # 这里给 max，和 DeepSWE 那轮评测同配置。嫌贵就在网页「设置 → 三魂档位」降到 standard/light，
+          # 或整栏改 off 退回上面的求稳/求成/求全老人设（输入立刻小一截）。
+          effort:
+            align: max
+            erudite: max
+            empiric: max
+
+          # 共识过程参数（与主线开发机同配置）
+          consensus:
+            trace: reasoning            # 旁白去向：reasoning=折叠思维链 / text=明文 / none=隐藏
+            innerEvidence: true         # 内层取证：盲写期间允许调专属工具（false = 连专属工具一起关）
+            voteEffort: off             # 表决这类小作业不思考，省钱提速
+            replayReasoning: latest     # 胜者的思考折进历史活一轮（下下轮剥掉）
+            soulTimeoutMs: 1800000      # 单魂一次调用总上限 30 分钟（0 = 不限，靠 idle 兜底）
+            reasoningFuseChars: 500000  # 思考超 50 万字符熔断，防失控思维链
+          # 记忆范围：session=会话级 / project=项目级 / full=完全版。只影响之后新开的会话。
+          memoryScope: session
 
 # Web UI 客户端插件（记忆面板 / 监控 tab / 设置分区）
 - insert:

@@ -9,7 +9,7 @@ import {
 } from './lib/util.mjs'
 
 const HELP = `
-${color.bold('TriSoul')} —— 三体共识 Agent（基于 DeepSeek Harness）
+${color.bold('TriSoul')} —— 三魂共识 Agent（基于 DeepSeek Harness）
 
   npx dsh-trisoul <命令> [选项]
 
