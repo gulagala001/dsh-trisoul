@@ -112,8 +112,6 @@
 这 38 题是按「官方 flash 表现差」挑的，TriSoul 每题只跑 1 次、官方每题 4 次，
 所以上面对比用的是「平均每次通过率」（pass@1），不是「四次里至少过一次」（pass@4）。
 
-那轮评测用的是另一条 API 渠道、推理档位拉满，和这里的默认配置不完全一样，数字仅供参考。
-
 ### 完整报告
 
 **[→ TriSoul × DeepSWE：用一个小模型，做到接近大模型的事](https://gulagala001.github.io/dsh-trisoul/deepswe-report.html)**
