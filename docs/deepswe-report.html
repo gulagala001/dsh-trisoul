@@ -155,7 +155,7 @@ footer{margin-top:60px;color:var(--muted);font-size:13px;border-top:1px solid va
 </table>
 <ul>
 <li><b>其他题分数不变</b>：只把已测 38 题换成实测结果，其余 75 题维持 flash 官方成绩 → <b>60.0%</b>，从第 38 位升到第 26 位，与 deepseek-v4-pro（62.8%）、gpt-5.6-terra xhigh（60.2%）同档。</li>
-<li><b>其他题获同类型提升</b>：在已测 38 题上，TriSoul 把 flash 剩余失败的 22.5% 转成了通过；把同样的转化率套到未测三桶 → <b>63.8%</b>，第 23 位，与 claude-opus-5-max（63.5%）、gpt-5.5 high（64.4%）同档。</li>
+<li><b>其他题获同类型提升</b>：在已测 38 题上，TriSoul 把 flash 剩余失败的 22.5% 转成了通过；把同样的转化率套到未测三桶 → <b>63.8%</b>，第 23 位，与 gpt-5.5 high（64.4%）、deepseek-v4-pro max（62.8%）同档。</li>
 <li>上界参考（转化率翻倍）67.5%，第 14 位。榜首 claude-opus-5-max 为 73.6%。</li>
 </ul>
 <p class="small">这是推算不是实测：①未测三桶是 flash 本来就常做对的题，TriSoul 会不会在这些题上引入回归（本轮在难题上观察到 4 条实质回归）没有数据；②TriSoul 每题只有 1 次样本，11/36 的 95% 置信区间大约是 17%–47%；③假设"同类型提升"是把难题上的转化率直接平移，是否成立要跑了才知道。要把推算变成实测，按 3 并发跑满剩余 75 题约需 22 小时机时。</p>
