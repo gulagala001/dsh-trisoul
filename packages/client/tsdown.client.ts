@@ -121,27 +121,6 @@ export function clientBundle(
   }
 }
 
-/**
- * Build a Client-only Node library during the Client pass.
- * @param id - Package name used in tsdown diagnostics.
- * @param libEntry - Emitted JavaScript entries consumed from `lib/types`.
- * @returns ENV-selected tsdown config for the Client build face.
- */
-export function clientLibrary(id: string, libEntry: readonly string[]): BuildFaceConfig {
-  const lib = clientLibraryConfig(id, libEntry)
-  return clientOnly([lib])
-}
-
-/**
- * Select arbitrary package-local configs only during the Client pass.
- * @param configs - Node-side configs emitted after Client tsc.
- * @returns ENV-selected tsdown config for the Client build face.
- */
-export function clientOnly(configs: readonly UserConfig[]): BuildFaceConfig {
-  return ({ env }) => buildFace(env?.DSH_BUILD_FACE) === 'host'
-    ? [SKIP_WORKSPACE_BUILD]
-    : [...configs]
-}
 
 interface ClientBundleOptions {
   /** Emit the Node-side artifacts during the Host pass instead of the Client pass. */

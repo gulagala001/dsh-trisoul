@@ -88,9 +88,13 @@ export const isCanvasStateMsg = (e) => e.type === 'user/message' && e.data?.sour
 /** 记忆补注消息（renew 换代制，含新旧各版） */
 export const isMemSuppMsg = (e) => e.type === 'user/message' && e.data?.source?.kind === 'plugin' && e.data.source.plugin === 'trisoul-memory'
   && (contentTextOf(e).startsWith('[Task memory') || contentTextOf(e).startsWith('【记忆中枢补注'))
+/** todo 清单注入消息（trisoul-consensus 换代制，含新旧各版；机制同状态区 P2-2——只钉最新一版） */
+export const isTodoListMsg = (e) => e.type === 'user/message' && e.data?.source?.kind === 'plugin' && e.data.source.plugin === 'trisoul-consensus'
+  && contentTextOf(e).startsWith('[todo list]')
 const SHADOW_SOURCES = [
   { key: 'state', label: '画布状态区', match: isCanvasStateMsg },
   { key: 'supp', label: '记忆补注', match: isMemSuppMsg },
+  { key: 'todo', label: 'todo 清单', match: isTodoListMsg },
 ]
 /**
  * 扫一遍活表面：每个换代源（状态区/补注）的已换代旧版 ≥ shadowStale 就全部遮蔽。
@@ -244,6 +248,10 @@ export function pickRegion(session, {
   // 门槛若计入它就可能圈出「原料只剩几字」的空刀（终审 F1 同款）；只有活表面上 seq 最大的补注版算最新
   const isMemSupp = isMemSuppMsg
   const liveSuppSeq = surface.reduce((m, e) => (isMemSupp(e) && e.seq > m) ? e.seq : m, -1)
+  // todo 清单注入（trisoul-consensus 换代制，2026-08-28）：与状态区完全同款——只钉最新一版，旧版
+  // 已换代降级为直通项（可入区间、手术顺路吞、不进纪要原料——surgeon 侧 isTodoList 过滤）
+  const isTodoMsg = isTodoListMsg
+  const liveTodoSeq = surface.reduce((m, e) => (isTodoMsg(e) && e.seq > m) ? e.seq : m, -1)
   // ⑧ 用户原话退役：开时只有最新一条用户消息是恒真区；退役的旧用户消息成普通材料（可压，verbatim 可按 seq 回捞，
   // 约束由状态区恒真区 verbatim 引用接住）。默认关 = 全部用户消息钉死（旧行为）。
   const liveUserSeq = userRetirement
@@ -253,7 +261,8 @@ export function pickRegion(session, {
     && ((e.data?.source?.kind === 'user' && (!userRetirement || e.seq === liveUserSeq))
       || (!mergeCheckpoints && e.data?.source?.compactionId !== undefined)
       || e.data?.source?.form === 'snapshot'
-      || (isCanvasMsg(e) && e.seq === liveStateSeq))
+      || (isCanvasMsg(e) && e.seq === liveStateSeq)
+      || (isTodoMsg(e) && e.seq === liveTodoSeq))
   // 直通项：非钉死的插件 user/message（检查点 / 记忆注入 / 其它插件注入）——中枢不消化它们（不是对话事实），
   // 但它们占着 prompt；不让它们切断连续段、也不要求它们被消化，否则每条注入都是一个「洞」，前面的段永远圈不整
   const passthrough = (e) => (e.type === 'user/message' && e.data?.source?.kind === 'plugin' && !pinned(e)) || isShadowDeletion(e)
@@ -271,7 +280,7 @@ export function pickRegion(session, {
       // 终审 F1：状态区旧版也不算新材料——surgeon 侧会把它剔出纪要原料（isCanvasState 过滤），
       // 若这里计入，一条大旧版就能单独顶过门槛，圈出「原料只剩几字」的空刀 → 必被 requireShorter 拒。
       // （区间里的 canvas 消息必是旧版：最新一版被 pinned，进不了区间。）补注旧版同理（最新版是直通项可入区间，仍算材料）。
-      const fresh = events.filter(e => !isCheckpoint(e) && !isCanvasMsg(e) && !isShadowDeletion(e) && !(isMemSupp(e) && e.seq !== liveSuppSeq))
+      const fresh = events.filter(e => !isCheckpoint(e) && !isCanvasMsg(e) && !isTodoMsg(e) && !isShadowDeletion(e) && !(isMemSupp(e) && e.seq !== liveSuppSeq))
       if (fresh.length < minRegionEvents) return null
       if (fresh.reduce((n, e) => n + size(e), 0) < minTokens) return null
     }
@@ -325,10 +334,14 @@ export function createCanvas(ctx, config = {}) {
   // 连刀冷却（2026-08-21 用户拍板）：手术成功后也冷却 N 步——真机 10 刀里 2 组连刀（相邻步连续动刀），
   // 每刀都把检查点之后的整场前缀缓存作废；隔几步再动，区间攒大合并成一刀，少吃原文少砸缓存。0 = 关。
   const surgeryCooldownSteps = config.surgeryCooldownSteps ?? 3
-  let busy = false
-  let cooldown = 0
-  let lastFailedKey = null
-  let failStreak = 0   // 同一区间连败次数：冷却按它放大（连败的区间别每 N 步白烧一次手术刀）
+  // 手术调度状态按会话分表（08-30 S5：此前进程级一份——3081 多会话时 A 的连刀冷却/忙锁/连败计数全落到 B 头上，
+  // `${start}-${end}` 裸 key 跨会话撞名连坐）。同包 stateZone/prober 早已按 sessionId 分表，这里补齐。
+  const sched = new Map()   // sessionId → { busy, cooldown, lastFailedKey, failStreak }
+  const schedOf = (sid) => {
+    let sc = sched.get(sid)
+    if (!sc) { sc = { busy: false, cooldown: 0, lastFailedKey: null, failStreak: 0 }; sched.set(sid, sc) }   // failStreak：同一区间连败次数，冷却按它放大
+    return sc
+  }
   dbg(`apply: 判据=${config.digested === false ? '仅阈值' : '中枢已消化区间（阈值兜底）'} 保险丝=${regionOpts.thresholdChars > 0 ? `${regionOpts.thresholdChars} 字符` : `窗口×${regionOpts.thresholdRatio}（未知窗口兜底 ${regionOpts.thresholdFallbackChars} 字符）`} keepTail=${regionOpts.keepTailEvents} minRegion=${regionOpts.minRegionEvents}事件/${regionOpts.minRegionTokens}token probe=${config.probe ?? true} state=${config.state ?? true}`)
   // 上报给 @trisoul/dsh-api 监控；无监听者时静默。phase: 'surgery' | 'state' | 'probe'
   const report = (info) => { try { ctx.emit('trisoul/canvas', info) } catch (e) { dbg(`EMIT-FAIL trisoul/canvas ${String(e?.message ?? e)}`) } }
@@ -365,15 +378,16 @@ export function createCanvas(ctx, config = {}) {
       }
     } catch (e) { dbg(`遮蔽刀失败(放行): ${String(e).slice(0, 300)}`) }
     try {
-      if (cooldown > 0) cooldown--
+      const sc = agent?.session ? schedOf(agent.session.id) : null
+      if (sc && sc.cooldown > 0) sc.cooldown--
       // 状态区降级 = 压走的原文没地方接着：宁可让上下文涨，也不做「只切不补」的手术。
       // （真机取证：容器里 canvas provider 配错致提炼 100% 失败，手术仍切了 91 次，读过的内容直接蒸发。）
-      if (!busy && cooldown === 0 && agent?.session && stateZone.degraded(agent.session.id)) {
+      if (sc && !sc.busy && sc.cooldown === 0 && stateZone.degraded(agent.session.id)) {
         warn(`状态区降级（提炼连续失败 ≥ ${stateZone.failLimit}），本步不动刀——先修好状态区再压`)
-      } else if (!busy && cooldown === 0 && agent?.session) {
+      } else if (sc && !sc.busy && sc.cooldown === 0) {
         const region = pickRegion(agent.session, { ...regionOpts, userRetirement: userRetirementOf(), digestedRanges: digestedOf(agent.session) })
         if (region) {
-          busy = true
+          sc.busy = true
           const t0 = Date.now()
           try {
             dbg(`手术[${region.via}]: seq ${region.start}..${region.end}（区间 ${region.chars} 字符 ≈${region.tokens} token${region.checkpoints ? `，含 ${region.checkpoints} 个检查点` : ''} / 表面总量 ${region.total} 字符${region.totalTokens !== undefined ? ` ≈${region.totalTokens} token，阈 ${region.limitTokens}` : ''}）`)
@@ -395,8 +409,8 @@ export function createCanvas(ctx, config = {}) {
             // checkpointChars：检查点长度，供 D 评测算压缩比（chars → checkpointChars）
             report({ phase: 'surgery', ...region, ok: true, sessionId: agent.session.id, durationMs: Date.now() - t0, compactionId: r?.compactionId,
               ...(checkpointText ? { checkpointChars: checkpointText.length } : {}) })
-            lastFailedKey = null; failStreak = 0
-            cooldown = surgeryCooldownSteps   // 连刀冷却：这刀成功后歇 N 步，让下一刀的区间长大合并
+            sc.lastFailedKey = null; sc.failStreak = 0
+            sc.cooldown = surgeryCooldownSteps   // 连刀冷却：这刀成功后歇 N 步，让下一刀的区间长大合并
             // 探针验收：拿手术后的检查点文本答从预压缩稿抽出的事实题；异步跑，失败仅告警
             if (prober.enabled) {
               probeTail = prober.runProbe({
@@ -410,11 +424,11 @@ export function createCanvas(ctx, config = {}) {
             // 失败即冷却，同一区间连败越多冷却越长，别每步都重试
             //（旧版首败不设冷却、下一步立即重试；且区间尾端外扩会换 key 让冷却永不生效——任何失败都要歇）
             const key = `${region.start}-${region.end}`
-            failStreak = key === lastFailedKey ? failStreak + 1 : 1
-            cooldown = failCooldownSteps * failStreak
-            lastFailedKey = key
+            sc.failStreak = key === sc.lastFailedKey ? sc.failStreak + 1 : 1
+            sc.cooldown = failCooldownSteps * sc.failStreak
+            sc.lastFailedKey = key
             throw e
-          } finally { busy = false }
+          } finally { sc.busy = false }
         }
       }
     } catch (e) { dbg(`手术失败(放行): ${String(e).slice(0, 300)}`) }

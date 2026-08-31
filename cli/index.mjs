@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // dsh-trisoul —— TriSoul 的一键安装 / 启停 / 卸载入口。
 import { init } from './lib/init.mjs'
+import { patchOnPayloadAll } from './lib/patch-onpayload.mjs'
 import { patchPiAi } from './lib/patch-pi-ai.mjs'
 import { restart, start, status, stop, tailLog } from './lib/server.mjs'
 import { uninstall } from './lib/uninstall.mjs'
@@ -66,12 +67,16 @@ function parseArgs(argv) {
 async function doctor() {
   const lay = layout()
   if (!isInstalled(lay)) { fail('还没安装。先跑：npx dsh-trisoul init'); return 1 }
-  const res = await patchPiAi(lay.host)
-  if (res.missing) { warn('没找到 pi-ai——宿主结构可能变了'); return 1 }
-  if (res.patched.length) ok(`补丁已重打（${res.patched.length} 处）`)
-  else ok(`补丁已在位（${res.skipped.length} 处）`)
+  let code = 0
+  for (const [label, res] of [['pi-ai 流式解析', await patchPiAi(lay.host)], ...await patchOnPayloadAll(lay.host)]) {
+    const bad = res.missing ? [] : res.skipped.filter(x => /拒绝|回滚|出错|包结构/.test(x))
+    if (res.missing) { warn(`${label}：没找到目标包——宿主结构可能变了`); code = 1 }
+    else if (bad.length) { warn(`${label}：有问题——`); for (const x of bad) log(`    ${x}`); code = 1 }
+    else if (res.patched.length) ok(`${label}：已重打（${res.patched.length} 处）`)
+    else ok(`${label}：已在位（${res.skipped.length} 处）`)
+  }
   log(color.dim(`  安装目录 ${lay.root}`))
-  return 0
+  return code
 }
 
 const { opts, rest } = parseArgs(process.argv.slice(2))

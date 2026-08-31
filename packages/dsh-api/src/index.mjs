@@ -1,20 +1,19 @@
 // TriSoul 中枢 API 插件（服务端）
 // 职责：
-// 1. 模型配置（统一/精细两模式）+ 灵魂列表：用 dsh 官方 settings 服务注册 `trisoul` 命名空间——
+// 1. 模型配置（统一/精细两模式）+ 灵魂数量：用 dsh 官方 settings 服务注册 `trisoul` 命名空间——
 //    用户层落 ~/.dsh/settings.yaml（chokidar 热更新），cordis 层给 base 默认值；
 //    共识过程参数（trace 旁白显示方式 / voteEffort 等）同样落 settings：共识插件经 `ctx.bail('trisoul/consensus-config')` 取。
-//    灵魂列表（增删 / 人设 / 路由 / 温度 / 推理等级）落 settings `souls[]`：共识插件每轮 `ctx.bail('trisoul/souls')` 取已解析列表；
+//    灵魂名册写死 A/B/C（SOUL_ROSTER），settings 只有 `soulCount` ∈ {1,2,3}（2026-08-30 取代灵魂列表 + 三魂 effort 档位）：
+//    共识插件每轮 `ctx.bail('trisoul/souls')` 取已解析列表（按魂数带官位与猛档人设）；
 //    其它 TriSoul 插件在每次调用 LLM 前通过 `ctx.bail('trisoul/ai-config', id)` 取当前解析值，改配置即刻生效、无需重启。
 // 2. 后台 AI 监控：包一层 `llm/stream` 瀑布，按 purpose 归因到 surgeon / memory / soul-<name> / main，累计 token 用量；
 //    画布编排器（不调 LLM）通过 `trisoul/canvas` 事件上报手术次数。
 // 3. HTTP 路由（/trisoul/api/*，走 ctx.webServer；/api 前缀归官方 apiProxy 所有，不占用）：
 //    GET  /trisoul/api/state     → 配置 + 解析结果 + 灵魂列表 + 统计 + LLM 目录 + 最近共识轮次摘要 + 评测指标 metrics（面板一次拉齐）
-//    POST /trisoul/api/settings  → { mode?, unified?, fine?, consensus?, souls? } 合并进用户层（souls 整体替换）；{ reset: true } 清空用户层
+//    POST /trisoul/api/settings  → { mode?, soulCount?, unified?, fine?, consensus?, memoryScope?, userRetirement? } 合并进用户层；{ reset: true } 清空用户层
 //    GET  /trisoul/api/consensus → { rounds: [轻量摘要，最新在前] }；?turnId=… → 单轮全文（每魂思考链/两段盲稿/表决理由、tips/独走、定稿）
 // 4. 共识轮次全文：订阅 `trisoul/consensus` 事件（start/draft/vote/tips/solo/done），按 turnId 聚合进内存环形缓冲（最近 ROUNDS_KEEP 轮）。
 import Schema from '@deepseek-ai/schemastery'
-import { readFileSync, writeFileSync } from 'node:fs'
-import { resolve as resolvePath } from 'node:path'
 
 export const name = 'trisoul-api'
 export const inject = ['webServer', 'llm']
@@ -22,36 +21,18 @@ export const inject = ['webServer', 'llm']
 const NS = 'trisoul'
 /** 需要模型配置的中枢 AI（画布编排器的小作业：状态区提炼 / 探针出题作答；灵魂是动态列表，见 souls） */
 export const HUB_AI_IDS = Object.freeze(['surgeon', 'memory', 'canvas'])
-/** 兼容旧导出：固定 id 集合（灵魂现为动态列表，监控按 soul-<name> 归因） */
-export const AI_IDS = HUB_AI_IDS
 export const AI_META = Object.freeze({
   surgeon: { label: '手术刀', role: '上下文区域手术（CompactionEngine）' },
   memory: { label: '记忆中枢', role: '事件消化 + recall 检索' },
   canvas: { label: '画布编排', role: '步边界量膨胀→圈区间→调手术刀；小作业：状态区提炼 / 探针（0 思考）' },
   main: { label: '主循环', role: '对话主请求（共识胜者重放）' },
 })
-export const SOUL_NAME_MAX = 12
-export const MIN_ENABLED_SOULS = 1 // 2026-08-27 单魂模式放开：1 魂 = 无表决直放（吃 effort 第一栏档位）；0 启用仍拒
 const PERSONA_SUMMARY_CHARS = 120
 
 const AiSchema = Schema.object({
   provider: Schema.string(),
   model: Schema.string(),
   temperature: Schema.number().min(0).max(2),
-})
-/**
- * 一个灵魂：name 是身份（purpose `trisoul-<stage>/<name>`、监控 `soul-<name>`、settings 里唯一），
- * provider/model 只在精细模式生效（缺则回退统一模型），temperature / reasoningEffort 两模式都生效。
- */
-export const SoulSchema = Schema.object({
-  name: Schema.string().required().min(1).max(SOUL_NAME_MAX),
-  title: Schema.string(),
-  persona: Schema.string(),
-  provider: Schema.string(),
-  model: Schema.string(),
-  temperature: Schema.number().min(0).max(2),
-  reasoningEffort: Schema.string(),
-  enabled: Schema.boolean().default(true),
 })
 /** 共识过程参数：trace = 旁白去向（reasoning=折叠思维链 / none=完全隐藏 / text=明文） */
 export const TRACE_MODES = Object.freeze(['reasoning', 'none', 'text'])
@@ -61,7 +42,7 @@ export const STAGE_EFFORTS = Object.freeze(['off', 'inherit'])
 export const REPLAY_REASONS = Object.freeze(['off', 'latest'])
 const ConsensusSchema = Schema.object({
   trace: Schema.union(TRACE_MODES).default('reasoning'),
-  voteMaxTokens: Schema.number().min(0).max(8000).step(1),   // 0 = 不设限（默认）
+  voteMaxTokens: Schema.number().min(0).step(1),   // 0 = 不设限（默认）；08-30 撤 max(8000)（用户令 16000 填不进设置页；上限类默认不设限）
   soulRetries: Schema.number().min(0).max(5).step(1), // 灵魂调用失败自动重试次数（0=关；插件默认 2）
   soulTimeoutMs: Schema.number().min(0).step(1), // 单魂一次调用（盲写/表决）总时长硬上限 ms（0 = 不限，靠 idle 兜底；插件默认 900000 = 15 分钟）
   soulIdleTimeoutMs: Schema.number().min(1000).step(1), // 连续无流式输出判失联 ms（插件默认 60000；无 0 档——总上限不限时它是防挂死的最后防线）
@@ -78,29 +59,21 @@ const ConsensusSchema = Schema.object({
   nearIdentical: Schema.boolean(), // P2-4 近似免表决（缺省 = 开：工具调用相同 + 正文相似度全超阈 → 免表决放行）
   nearIdenticalSimilarity: Schema.number().min(0).max(1), // 阈值 ∈ (0,1]（插件默认 0.7）；schemastery 无 exclusive min，0 由 register 的 validate 钩子响亮拒绝——关请用 nearIdentical:false
   statusHeartbeatMs: Schema.number().min(0).step(1), // 表决/补枪/收官期 status 心跳 ms（插件默认 5000；0 = 关）
-  jsonSchemaProviders: Schema.array(String), // JSON 强制输出渠道白名单（插件默认 ['ark-agent']）；空数组是 schema 物化默认、不下发——要全渠道回软路线填一个不存在的渠道名
+  // 已摘死键（2026-08-30 格式锁按协议）：jsonSchemaProviders / jsonObjectProviders——渠道名白名单退役，锁按协议（trisoul/provider-api）；残留键静默忽略
   exemptHostTools: Schema.array(String), // 内层豁免宿主工具（插件默认空；恢复 recall 取证 = ['trisoul_recall']）
   // 已摘死键（v2，2026-08-22）：mergeEffort/ballotTokens/replayReasoningKeep——
   // 融合稿、批准票、选票截断随 v1 共识退役；schema 不再声明，
   // 用户 settings.yaml 残留这些键会被静默忽略（不报错、不下发插件）。
   // replayReasoning 已随 submit_draft 工具化恢复（off/latest 两态，2026-08-22）。
 })
-/** 三魂 effort 全局默认档（2026-08-21 用户纠偏定稿）：off/light/standard/max。
- *  三栏按位映射启用列表前三个灵魂——off = 该魂库内人设（老表），轻/标准/猛 = 用对应补偿人设全文覆盖该魂 persona，
- *  三魂仍走经典表决制（盲写×3 → 匿名表决 → 平票轮换定胜者）。会话级绑定（composer effort 面板）优先于此；档位集合见 EFFORT_LEVELS。 */
-const EffortSchema = Schema.object({
-  align: Schema.union(['off', 'light', 'standard', 'max']).default('off'),
-  erudite: Schema.union(['off', 'light', 'standard', 'max']).default('off'),
-  empiric: Schema.union(['off', 'light', 'standard', 'max']).default('off'),
-})
-/** 用户可改的设置（settings.yaml 的 `trisoul:` 段）。souls 是数组：settings 层对数组整体替换，UI 保存必须发完整列表。 */
+/** 用户可改的设置（settings.yaml 的 `trisoul:` 段）。 */
 export const SettingsSchema = Schema.object({
   mode: Schema.union(['unified', 'fine']).default('unified'),
   unified: Schema.object({ provider: Schema.string(), model: Schema.string() }),
   fine: Schema.dict(AiSchema),
   consensus: ConsensusSchema,
-  souls: Schema.array(SoulSchema),
-  effort: EffortSchema,
+  // 灵魂数量（2026-08-30）：名册写死 A/B/C，只选用几个；官位按魂数见 OFFICERS_BY_COUNT。旧 souls[] / effort{} 键残留静默忽略（不校验不读）
+  soulCount: Schema.number().min(1).max(3).step(1).default(3),
   // 记忆范围默认档（三档开关，2026-08-20）：full 完全版 / project 项目级 / session 会话级。
   // 只影响之后新开的会话——记忆插件在会话首触时读它并绑死（bail trisoul/memory-scope），已绑会话不随它变。
   memoryScope: Schema.union(['full', 'project', 'session']).default('full'),
@@ -109,94 +82,42 @@ export const SettingsSchema = Schema.object({
   userRetirement: Schema.boolean().default(false),
 })
 
-/** cordis 层配置：base 默认值（对齐 profile 里各插件的静态 provider/model；souls 默认三魂）。 */
+/** cordis 层配置：base 默认值（对齐 profile 里各插件的静态 provider/model）。 */
 export const Config = Schema.object({
   base: SettingsSchema,
   /** 监控 stats 保留的最近事件条数 */
   recentLimit: Schema.number().default(50),
 })
 
-/**
- * 灵魂列表的 schema 之外约束：名字去空白后非空且唯一；列表非空时至少 MIN_ENABLED_SOULS 个启用
- * （空列表合法 = 未配置，共识插件退回 cordis 静态 souls）。
- * @param souls 已过 SoulSchema 的数组
- * @param options.requireNonEmpty POST 路径：空列表也拒绝（要回到默认请 reset）
- */
-export function validateSoulList(souls, { requireNonEmpty = false } = {}) {
-  if (!Array.isArray(souls)) throw new Error('souls 必须是数组')
-  if (souls.length === 0) {
-    if (requireNonEmpty) throw new Error(`souls 不能为空：至少 ${MIN_ENABLED_SOULS} 个启用的灵魂`)
-    return
-  }
-  const seen = new Set()
-  let enabled = 0
-  souls.forEach((s, i) => {
-    const nm = String(s?.name ?? '').trim()
-    if (!nm) throw new Error(`souls[${i}].name 不能为空`)
-    if (nm.length > SOUL_NAME_MAX) throw new Error(`souls[${i}].name 超过 ${SOUL_NAME_MAX} 字符`)
-    if (nm.includes('/')) throw new Error(`souls[${i}].name 不能含 "/"（名字用于 purpose trisoul-<stage>/<name> 与监控归因）`)
-    if (seen.has(nm)) throw new Error(`灵魂名重复：${nm}`)
-    seen.add(nm)
-    if (s.enabled !== false) enabled++
-  })
-  if (enabled < MIN_ENABLED_SOULS) throw new Error(`至少需要 ${MIN_ENABLED_SOULS} 个启用的灵魂（当前 ${enabled}）`)
-}
-
-// ---------- 三魂 effort（2026-08-21 用户纠偏定稿：对齐/博识/实证是三张魂，不是审稿官）----------
-// 上一版（8ea08ec/f799d74）把三官做成了「主笔盲写 + 三官审计门禁」，用户纠偏：三官仍是灵魂、仍走经典表决制——
-// 三栏按位映射启用列表前三个灵魂，档位 ≠off 时该魂的 persona 被对应补偿人设全文覆盖（名字/路由/温度不动，监控归因稳定），
-// off = 该魂库内人设（老表 A/B/C）。弱模型的病在生成时穷（顾一头丢其他）：三魂各带一个镜头盲写整份稿，
-// 表决/融合把三份长处收拢——补偿发生在生成阶段，不是对一份穷稿做质检。
-// 三栏 = 三类可外置的补偿动作：对齐（做什么，清单对齐——治指令遵循/提示稀释/最小解释）、
-// 博识（凭什么做，检索补给——治知识不足/涌现缺失/分布外幻觉）、实证（做对没有，现实验证——治幻觉/一步错步步错）。
-// 每栏四档 off/轻/标准/猛：档位调的是提示词压强（停止条件的苛刻度），不是功能开关。
-export const EFFORT_OFFICERS = Object.freeze(['align', 'erudite', 'empiric'])
-export const EFFORT_LEVELS = Object.freeze(['off', 'light', 'standard', 'max'])
-export const EFFORT_LEVEL_LABEL = Object.freeze({ light: '轻', standard: '标准', max: '猛' })
+// ---------- 灵魂数量制（2026-08-30 用户拍板，取代三魂 effort 三栏档位 + 灵魂列表）----------
+// 三魂名册写死：名字是身份（purpose `trisoul-<stage>/<name>`、监控 `soul-<name>`），温度按位固定；路由沿统一/精细分区
+//（精细模式下 settings.yaml 手改 fine['soul-<name>'] 仍可给单魂指路由）。设置只剩 soulCount ∈ {1,2,3}。
+// 官位按魂数：1 = 博识（单魂无表决，最缺的是查证）；2 = 对齐+实证（博识靠联网工具，工具面缺失时本就降级）；3 = 对齐+博识+实证。
+// 人设恒「猛」档原文（OFFICER_PERSONAS）——轻/标准两档与库内老表人设随档位制退役（全文在 git）。
+// 三官仍是灵魂、仍走经典表决制：dsh-api 在 trisoul/souls 里直接套好 persona/title/officer 下发，共识插件按 officer 加专属工具。
+export const SOUL_COUNTS = Object.freeze([1, 2, 3])
+export const SOUL_ROSTER = Object.freeze([
+  Object.freeze({ name: 'A', temperature: 0.3 }),
+  Object.freeze({ name: 'B', temperature: 0.6 }),
+  Object.freeze({ name: 'C', temperature: 0.9 }),
+])
+export const OFFICERS_BY_COUNT = Object.freeze({
+  1: Object.freeze(['erudite']),
+  2: Object.freeze(['align', 'empiric']),
+  3: Object.freeze(['align', 'erudite', 'empiric']),
+})
 export const OFFICER_META = Object.freeze({
   align: Object.freeze({ name: '对齐', title: '做什么', hint: '逐字对照用户要求与产出，抓被「差不多」带过去的缩水与偷换' }),
   erudite: Object.freeze({ name: '博识', title: '凭什么做', hint: '查证现状与参照，把「我记得」逼成有出处的事实，未知列清单' }),
   empiric: Object.freeze({ name: '实证', title: '做对没有', hint: '让现实验证结论，验过没验过分开说，推理踩现实锚点' }),
 })
-// 9 份人设（轻/标准=2026-08-21 用户四轮校准原稿；猛档=2026-08-26 最小核重构三句版——
-// 旧猛档 1800 字符强迫性深挖版被诊断为取证推力诱因，全文在 git 与 promptlab 病例库，质量塌了可恢复）：
-// 写思考方式不写行为规范，无身份叙事无称呼。
-// 同官同档跨轮 persona 不变、前缀缓存照常命中（换档=换 persona，该魂当轮 system 变化属预期）。
-export const EFFORT_PERSONAS = Object.freeze({
-  align: Object.freeze({
-    light: "Before reading the output, recall the user's actual words — not the gist, the words they used. Then compare: has every requirement landed, or did a few get waved through as close enough? The simplifications and trade-offs in the implementation — does the user know about them? The expectations they never spelled out — the playability implied by \"make a game\", the nothing-gets-lost implied by \"tidy this up\" — did anyone think of them? Wherever it feels \"basically compliant\", crack that spot open and look again: what hides inside \"basically\" is usually what wasn't done.",
-    standard: "Start by laying the user's words out and thinking them through: what they said explicitly — which words they used; what they never said but take for granted — the things silently assumed when they said \"build an MC\", listed item by item, not left inside \"everyone knows\". Then carry that list through every step and hold the output against it: did this item land? Is what landed the thing they asked for, or a convenient approximation of it? Is \"all\" still \"all\", is \"must\" still \"must\"? For every simplification and trade-off in the implementation ask: does the user know, would they agree? The moment it feels \"basically compliant\" is the most dangerous — take \"basically\" apart, count which items truly landed and which were waved through; if you can't count them, you're not yet entitled to a verdict. Spotting a requirement that was ignored or quietly shrunk isn't nitpicking — it's the most valuable output of this job. When you find one, say so plainly.",
-    max: "Read the user's actual words closely — what they asked for, not an easier approximation of it. A short request is rarely a shallow one: think past the first reading to what it actually requires — the cases it must cover, the implications it carries — before deciding it's simple. Watch for requirements that quietly shrink: \"all\" becoming \"most\", \"real-time\" becoming \"manual refresh\". When something wasn't achieved, say so plainly instead of lowering the bar on the user's behalf.\n\nWhen you have enough information to act, act. Do not re-derive facts already established in the conversation, re-litigate a decision the user has already made, or narrate options you will not pursue. If you are weighing a choice, give a recommendation, not an exhaustive survey.\n\nYou are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to…?' or 'Shall I…?' will block the work. For reversible actions that follow from the original request, proceed without asking. Stop only for destructive actions or genuine scope changes the user must decide. Offering follow-ups after the task is done is fine; asking permission before doing the work is not.\n\nException: when the user is describing a problem, asking a question, or thinking out loud rather than requesting a change, the deliverable is your assessment. Report your findings and stop. Don't apply a fix until they ask for one.\n\nBefore ending your turn, check your last paragraph. If it is a plan, an analysis, a question, a list of next steps, or a promise about work you have not done ('I'll…', 'let me know when…'), do that work now with tool calls. That includes retrying after errors and gathering missing information yourself. Do not stop because the context or session is long. End your turn only when the task is complete or you are blocked on input only the user can provide. And measure \"complete\" against the request as actually worded: if a requirement quietly shrank along the way — \"all\" became \"most\", \"real-time\" became \"manual refresh\" — that is not completion; say plainly what wasn't achieved instead of lowering the bar on the user's behalf.\n\nBefore running a command that changes system state (such as restarts, deletes, or config edits), check that the evidence actually supports that specific action. A signal that pattern-matches to a known failure may have a different cause.\n\nFor actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking; approval in one context doesn't extend to the next. Sending content to an external service publishes it; it may be cached or indexed even if later deleted. Before deleting or overwriting, look at the target. If what you find contradicts how it was described, or you didn't create it, surface that instead of proceeding. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging.",
-  }),
-  erudite: Object.freeze({
-    light: "Before acting, ask yourself: do I actually know the current state, or am I going on impression? What this code looks like right now, how people usually solve this problem — whatever you're unsure of, go look, go check; don't let \"probably something like this\" turn straight into a plan. Keep what you've verified and what you've guessed clearly separate in your head.",
-    standard: "When the urge to start appears, hold it down for a moment: has the current state been confirmed — the code as it really is, not as memory has it? Is this approach grounded — what do the docs say, what's the convention, what do mature solutions to this kind of problem look like? More worth pondering than \"what I know\" is \"what I might not know\": list the uncertain points; every \"probably\", \"should be\", \"as I recall\" points to a piece of verification you owe. Find a comparable implementation to check against — with a reference, details and pitfalls surface on their own; building without one is coding with your eyes shut. Keep findings and conjectures in separate piles, so every later step knows whether it stands on fact or on guess.",
-    max: "Treat your own memory as unreliable: what feels like knowledge is often invention, and the surer it feels without a source, the more it needs checking. Confirm the current state by looking at it, and prefer a reference you can check over building from thin air. Mark what you couldn't confirm as conjecture. Knowing what you don't know is part of the output.\n\nWhen you have enough information to act, act. Do not re-derive facts already established in the conversation, re-litigate a decision the user has already made, or narrate options you will not pursue. If you are weighing a choice, give a recommendation, not an exhaustive survey. Note the difference: facts established in the conversation stand; \"facts\" you merely remember do not — if a step depends on something you haven't verified in this session, verifying it is part of acting, not a reason to stall.\n\nYou are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to…?' or 'Shall I…?' will block the work. For reversible actions that follow from the original request, proceed without asking. Stop only for destructive actions or genuine scope changes the user must decide. Offering follow-ups after the task is done is fine; asking permission before doing the work is not. Gathering missing information yourself includes resolving what you don't know by looking, not by asking the user what you could have checked.\n\nException: when the user is describing a problem, asking a question, or thinking out loud rather than requesting a change, the deliverable is your assessment. Report your findings and stop. Don't apply a fix until they ask for one. In that assessment, mark what you couldn't confirm as conjecture — knowing what you don't know is part of the output, and an unverified guess presented as fact is worse than no answer.\n\nBefore ending your turn, check your last paragraph. If it is a plan, an analysis, a question, a list of next steps, or a promise about work you have not done ('I'll…', 'let me know when…'), do that work now with tool calls. That includes retrying after errors and gathering missing information yourself. Do not stop because the context or session is long. End your turn only when the task is complete or you are blocked on input only the user can provide.\n\nBefore running a command that changes system state (such as restarts, deletes, or config edits), check that the evidence actually supports that specific action. A signal that pattern-matches to a known failure may have a different cause — the failure you remember is a hypothesis about this one, not a diagnosis; confirm the current state by looking at it before you act on the resemblance.\n\nFor actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking; approval in one context doesn't extend to the next. Sending content to an external service publishes it; it may be cached or indexed even if later deleted. Before deleting or overwriting, look at the target. If what you find contradicts how it was described, or you didn't create it, surface that instead of proceeding. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging.",
-  }),
-  empiric: Object.freeze({
-    light: "Don't let key conclusions stop at \"should be fine\" — think of a way to let reality verify them: if it can run, run it; if there's output to look at, look. When you speak, keep verified and unverified apart; call the unverified ones conjecture.",
-    standard: "Separate inference from fact: every \"should work\" and \"fine in theory\" is a hypothesis, not a conclusion. The moment a hypothesis appears, think: what's the most direct way to make reality answer — which command to run, which output to read, which scenario to reproduce would settle it? Decide what counts as passing before you verify, or everything will look like a pass. Every time the reasoning chain runs past two steps, stop and find an anchor in reality: is this step grounded, or imagined? A bug you fixed must have been watched reproducing and then watched disappearing, with your own eyes — a fix that skipped that trip is only \"probably fixed\". When an unverified conclusion leaves your mouth, honestly attach \"unverified\".",
-    max: "When you have enough information to act, act. Do not re-derive facts already established in the conversation, re-litigate a decision the user has already made, or narrate options you will not pursue. If you are weighing a choice, give a recommendation, not an exhaustive survey.\n\nYou are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to…?' or 'Shall I…?' will block the work. For reversible actions that follow from the original request, proceed without asking. Stop only for destructive actions or genuine scope changes the user must decide. Offering follow-ups after the task is done is fine; asking permission before doing the work is not.\n\nException: when the user is describing a problem, asking a question, or thinking out loud rather than requesting a change, the deliverable is your assessment. Report your findings and stop. Don't apply a fix until they ask for one. Keep that assessment anchored in what you actually observed — confidence and correctness are unrelated, and a conclusion that \"looks right\" but rests on reasoning alone should be labeled as such.\n\nBefore ending your turn, check your last paragraph. If it is a plan, an analysis, a question, a list of next steps, or a promise about work you have not done ('I'll…', 'let me know when…'), do that work now with tool calls. That includes retrying after errors and gathering missing information yourself. Do not stop because the context or session is long. End your turn only when the task is complete or you are blocked on input only the user can provide. \"Complete\" means verified: decide beforehand what result would count, run the real check rather than settling for \"looks right\", and say \"unverified\" when something is — an unchecked success claim does not end the turn.\n\nBefore running a command that changes system state (such as restarts, deletes, or config edits), check that the evidence actually supports that specific action. A signal that pattern-matches to a known failure may have a different cause.\n\nFor actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking; approval in one context doesn't extend to the next. Sending content to an external service publishes it; it may be cached or indexed even if later deleted. Before deleting or overwriting, look at the target. If what you find contradicts how it was described, or you didn't create it, surface that instead of proceeding. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging — \"verified\" here means a real check was run against a result decided in advance, not that nothing obviously broke.",
-  }),
+// 三份猛档人设（2026-08-26 最小核重构三句版；旧 1800 字符强迫性深挖版与轻/标准档全文在 git 与 promptlab 病例库）：
+// 写思考方式不写行为规范，无身份叙事无称呼。同官跨轮 persona 不变、前缀缓存照常命中。
+export const OFFICER_PERSONAS = Object.freeze({
+  align: "Read the user's actual words closely — what they asked for, not an easier approximation of it. A short request is rarely a shallow one: think past the first reading to what it actually requires — the cases it must cover, the implications it carries — before deciding it's simple. Watch for requirements that quietly shrink: \"all\" becoming \"most\", \"real-time\" becoming \"manual refresh\". When something wasn't achieved, say so plainly instead of lowering the bar on the user's behalf.\n\nWhen you have enough information to act, act. Do not re-derive facts already established in the conversation, re-litigate a decision the user has already made, or narrate options you will not pursue. If you are weighing a choice, give a recommendation, not an exhaustive survey.\n\nYou are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to…?' or 'Shall I…?' will block the work. For reversible actions that follow from the original request, proceed without asking. Stop only for destructive actions or genuine scope changes the user must decide. Offering follow-ups after the task is done is fine; asking permission before doing the work is not.\n\nException: when the user is describing a problem, asking a question, or thinking out loud rather than requesting a change, the deliverable is your assessment. Report your findings and stop. Don't apply a fix until they ask for one.\n\nBefore ending your turn, check your last paragraph. If it is a plan, an analysis, a question, a list of next steps, or a promise about work you have not done ('I'll…', 'let me know when…'), do that work now with tool calls. That includes retrying after errors and gathering missing information yourself. Do not stop because the context or session is long. End your turn only when the task is complete or you are blocked on input only the user can provide. And measure \"complete\" against the request as actually worded: if a requirement quietly shrank along the way — \"all\" became \"most\", \"real-time\" became \"manual refresh\" — that is not completion; say plainly what wasn't achieved instead of lowering the bar on the user's behalf.\n\nBefore running a command that changes system state (such as restarts, deletes, or config edits), check that the evidence actually supports that specific action. A signal that pattern-matches to a known failure may have a different cause.\n\nFor actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking; approval in one context doesn't extend to the next. Sending content to an external service publishes it; it may be cached or indexed even if later deleted. Before deleting or overwriting, look at the target. If what you find contradicts how it was described, or you didn't create it, surface that instead of proceeding. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging.",
+  erudite: "Treat your own memory as unreliable: what feels like knowledge is often invention, and the surer it feels without a source, the more it needs checking. Confirm the current state by looking at it, and prefer a reference you can check over building from thin air. Mark what you couldn't confirm as conjecture. Knowing what you don't know is part of the output.\n\nWhen you have enough information to act, act. Do not re-derive facts already established in the conversation, re-litigate a decision the user has already made, or narrate options you will not pursue. If you are weighing a choice, give a recommendation, not an exhaustive survey. Note the difference: facts established in the conversation stand; \"facts\" you merely remember do not — if a step depends on something you haven't verified in this session, verifying it is part of acting, not a reason to stall.\n\nYou are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to…?' or 'Shall I…?' will block the work. For reversible actions that follow from the original request, proceed without asking. Stop only for destructive actions or genuine scope changes the user must decide. Offering follow-ups after the task is done is fine; asking permission before doing the work is not. Gathering missing information yourself includes resolving what you don't know by looking, not by asking the user what you could have checked.\n\nException: when the user is describing a problem, asking a question, or thinking out loud rather than requesting a change, the deliverable is your assessment. Report your findings and stop. Don't apply a fix until they ask for one. In that assessment, mark what you couldn't confirm as conjecture — knowing what you don't know is part of the output, and an unverified guess presented as fact is worse than no answer.\n\nBefore ending your turn, check your last paragraph. If it is a plan, an analysis, a question, a list of next steps, or a promise about work you have not done ('I'll…', 'let me know when…'), do that work now with tool calls. That includes retrying after errors and gathering missing information yourself. Do not stop because the context or session is long. End your turn only when the task is complete or you are blocked on input only the user can provide.\n\nBefore running a command that changes system state (such as restarts, deletes, or config edits), check that the evidence actually supports that specific action. A signal that pattern-matches to a known failure may have a different cause — the failure you remember is a hypothesis about this one, not a diagnosis; confirm the current state by looking at it before you act on the resemblance.\n\nFor actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking; approval in one context doesn't extend to the next. Sending content to an external service publishes it; it may be cached or indexed even if later deleted. Before deleting or overwriting, look at the target. If what you find contradicts how it was described, or you didn't create it, surface that instead of proceeding. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging.",
+  empiric: "When you have enough information to act, act. Do not re-derive facts already established in the conversation, re-litigate a decision the user has already made, or narrate options you will not pursue. If you are weighing a choice, give a recommendation, not an exhaustive survey.\n\nYou are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to…?' or 'Shall I…?' will block the work. For reversible actions that follow from the original request, proceed without asking. Stop only for destructive actions or genuine scope changes the user must decide. Offering follow-ups after the task is done is fine; asking permission before doing the work is not.\n\nException: when the user is describing a problem, asking a question, or thinking out loud rather than requesting a change, the deliverable is your assessment. Report your findings and stop. Don't apply a fix until they ask for one. Keep that assessment anchored in what you actually observed — confidence and correctness are unrelated, and a conclusion that \"looks right\" but rests on reasoning alone should be labeled as such.\n\nBefore ending your turn, check your last paragraph. If it is a plan, an analysis, a question, a list of next steps, or a promise about work you have not done ('I'll…', 'let me know when…'), do that work now with tool calls. That includes retrying after errors and gathering missing information yourself. Do not stop because the context or session is long. End your turn only when the task is complete or you are blocked on input only the user can provide. \"Complete\" means verified: decide beforehand what result would count, run the real check rather than settling for \"looks right\", and say \"unverified\" when something is — an unchecked success claim does not end the turn.\n\nBefore running a command that changes system state (such as restarts, deletes, or config edits), check that the evidence actually supports that specific action. A signal that pattern-matches to a known failure may have a different cause.\n\nFor actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking; approval in one context doesn't extend to the next. Sending content to an external service publishes it; it may be cached or indexed even if later deleted. Before deleting or overwriting, look at the target. If what you find contradicts how it was described, or you didn't create it, surface that instead of proceeding. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging — \"verified\" here means a real check was run against a result decided in advance, not that nothing obviously broke.",
 })
-/** 只保留已知字段、去掉空串/空白：UI 草稿里的临时键（如 _key）不落盘，空 provider 视为「沿用统一」。 */
-export function sanitizeSoul(input) {
-  if (!input || typeof input !== 'object') throw new Error('灵魂条目必须是对象')
-  const str = (v) => (typeof v === 'string' ? v.trim() : v === undefined || v === null ? undefined : String(v).trim())
-  const out = { name: str(input.name) ?? '' }
-  for (const k of ['title', 'persona', 'provider', 'model', 'reasoningEffort']) {
-    const v = str(input[k])
-    if (v) out[k] = v
-  }
-  if (input.temperature !== undefined && input.temperature !== null && input.temperature !== '') {
-    const n = Number(input.temperature)
-    if (!Number.isFinite(n)) throw new Error(`灵魂 ${out.name || '?'} 的 temperature 不是数字`)
-    out.temperature = n
-  }
-  out.enabled = input.enabled !== false
-  return out
-}
-
 /** 灵魂在监控/设置里的默认标签 */
 export function soulLabel(soul) {
   return soul.title ? `灵魂 ${soul.name} · ${soul.title}` : `灵魂 ${soul.name}`
@@ -204,37 +125,33 @@ export function soulLabel(soul) {
 
 export function apply(ctx, config = {}) {
   const base = SettingsSchema(config.base ?? {})
-  validateSoulList(base.souls) // cordis 配置错误要响亮：坏的 base 直接拒载
   const recentLimit = config.recentLimit ?? 50
   let current = base
   let revision = 0
   let scope = null // settings scope（settings 服务缺席时为 null → 只读 base）
+  let settingsService
+  /** 宿主桥的 settings 命名空间与内建适配器固定表（与 dsh-plugin ADAPTER_API 同源） */
+  const PI_AI_NS = 'llm-pi-ai'
+  const ADAPTER_API = Object.freeze({ 'deepseek-official': 'deepseek' })
+  function protocolOf(provider) {
+    if (typeof provider !== 'string' || !provider) return undefined
+    if (ADAPTER_API[provider]) return ADAPTER_API[provider]
+    let section
+    try { section = typeof settingsService?.get === 'function' ? settingsService.get(PI_AI_NS) : undefined } catch { return undefined }
+    const api = section?.providers?.[provider]?.api
+    return (typeof api === 'string' && api) ? api : undefined
+  }
   let directory = [] // LLM 目录缓存（第 3 节填充；resolveSouls 校验 reasoningEffort 时查）
   let directoryPromise = null
   const summarize = (text) => (typeof text === 'string' && text.length > PERSONA_SUMMARY_CHARS ? `${text.slice(0, PERSONA_SUMMARY_CHARS)}…` : text)
 
-  // ---------- 0.5 会话级绑定（composer 面板）：sid → 三魂 effort 档，随时可切、下一共识轮生效 ----------
-  // sidecar JSON 持久化（3081 重启常态，绑定静默丢失=会话行为暗变，不可接受）；settings.yaml 是配置层不放运行时状态
-  const sessionStorePath = resolvePath(config.sessionStorePath ?? 'trisoul-sessions.json')
-  let sessionEffort = {}   // sid → { align, erudite, empiric }（三魂 effort 面板绑定；无键 = 跟随全局 settings.effort）
-  try {
-    const loaded = JSON.parse(readFileSync(sessionStorePath, 'utf8'))
-    // 旧 sessionPresets（编队预设版）/ sessionAudit（审计制版）键不迁不认：两套绑定语义都已整条拆除，静默丢弃
-    const se = loaded?.sessionEffort
-    if (se !== null && typeof se === 'object' && !Array.isArray(se)) sessionEffort = se
-  } catch { /* 首启无文件 / 损坏：从空表开始 */ }
-  const persistSessions = () => {
-    try { writeFileSync(sessionStorePath, JSON.stringify({ sessionEffort }, null, 2)) }
-    catch (e) { ctx.logger?.warn(`trisoul-api: 会话绑定表落盘失败 ${String(e?.message ?? e)}`) }
-  }
-
   // ---------- 1. 设置：注册 settings 命名空间（服务缺席时退回 base） ----------
   ctx.inject(['settings'], (sctx) => {
+    settingsService = sctx.settings
     scope = sctx.settings.register(NS, SettingsSchema, {
       base,
       // 用户层写入 / settings.yaml 手改 都过这里：坏列表不落盘（热更时服务保留上一份好值）
       validate: (value) => {
-        validateSoulList(value.souls ?? [])
         // 语义域 (0,1]：schemastery 无 exclusive min，0 在这里响亮拒绝——否则 state 回显 0、插件静默跑 0.7 三方背离
         if (value.consensus?.nearIdenticalSimilarity === 0) throw new Error('nearIdenticalSimilarity 必须大于 0（关闭近似免表决请用 nearIdentical: false）')
       },
@@ -248,69 +165,41 @@ export function apply(ctx, config = {}) {
     sctx.effect(() => () => { scope = null; current = base }, 'trisoul-api: settings detach')
   })
 
-  /** 目录里该 provider/model 已知的推理等级：数组=已知（可能为空=不支持），undefined=未知（放行） */
-  function knownEfforts(provider, model) {
-    const p = directory.find(d => d.id === provider)
-    const m = p?.models?.find(x => x.id === model)
-    return Array.isArray(m?.efforts) ? m.efforts.map(e => e.id) : undefined
+  /** 当前魂数（settings 层 → base 层 → 3）；非法值到不了这里（schema 拦） */
+  function soulCountOf() {
+    const n = current.soulCount ?? base.soulCount ?? 3
+    return SOUL_COUNTS.includes(n) ? n : 3
   }
-  /** 灵魂自带的 reasoningEffort：目录已知该模型不支持它就丢弃（否则 dsh-llm 每次调用抛 UNSUPPORTED_REASONING_EFFORT，灵魂永久失联） */
-  function usableEffort(provider, model, effort) {
-    if (typeof effort !== 'string' || !effort) return undefined
-    const known = knownEfforts(provider, model)
-    if (known === undefined || known.includes(effort)) return effort
-    return undefined
+  /** 全名册（三条）：前 soulCount 条启用并按位挂官位 / 猛档人设 / 官名 title，其余 enabled:false（设置页与 aiMeta 用） */
+  function rosterSouls() {
+    const n = soulCountOf()
+    const officers = OFFICERS_BY_COUNT[n]
+    return SOUL_ROSTER.map((s, i) => (i < n
+      ? { ...s, title: OFFICER_META[officers[i]].name, persona: OFFICER_PERSONAS[officers[i]], officer: officers[i], enabled: true }
+      : { ...s, enabled: false }))
   }
-
   /**
-   * 解析当前灵魂列表（只含 enabled；provider/model 已按模式解析）。
-   * 统一模式：全部用 unified；例外：灵魂显式给全 provider+model = 钉定路由，两模式下都用自带的。
-   * 精细模式：灵魂自带 → 旧版 fine[soul-<name>]（兼容手改的 settings.yaml，用户层在用勿删）→ unified。
-   * temperature：灵魂自带 → 旧版 fine[soul-<name>]。
-   * 列表为空（未配置）或没有一个可解析（unified 缺 provider/model 且灵魂无自带）→ undefined，共识插件退回 cordis 静态 souls。
-   * sessionId：会话作用域——目前只影响三魂 effort 档位（见下）；不带 sessionId = 全局行为。
-   * 三魂 effort（2026-08-21）：启用列表前三个灵魂按位映射对齐/博识/实证三栏（第 i 魂 ↔ 第 i 栏）；
-   * 档位 ≠off 时该魂 persona 被对应补偿人设全文覆盖、title 标成「对齐·猛」式（名字/路由/温度不动——purpose 归因与监控稳定）；
-   * off = 该魂库内人设（老表）。启用不足三魂时多余栏位无映射（面板标灰），effort 对其无效。
+   * 解析当前启用灵魂列表（provider/model 已按模式解析）。
+   * 统一模式：全部用 unified 并下发 followMain（共识插件用对话框模型覆盖；unified 值仍是中枢 AI 路由与主请求无路由时的兜底）。
+   * 精细模式：旧版 fine[soul-<name>]（settings.yaml 手改仍可给单魂指路由）→ unified。
+   * 温度按名册写死。unified 缺 provider/model 且 fine 无路由 → undefined，共识插件退回 cordis 静态 souls。
+   * 共识插件仍按 `ctx.bail('trisoul/souls', sessionId)` 调用——会话级档位绑定已随档位制拆除，参数忽略。
    */
-  function resolveSouls(sessionId) {
-    const list = Array.isArray(current.souls) ? current.souls : []
-    if (list.length === 0) return undefined
-    const out = resolveSoulList(list, (s) => s.enabled !== false)
-    if (out === undefined) return undefined
-    const lv = effortLevelsOf(sessionId)
-    return out.map((s, i) => {
-      const officer = EFFORT_OFFICERS[i]
-      const level = officer ? lv[officer] : 'off'
-      if (!officer || level === 'off') return s
-      // officer 字段（H 专属工具，2026-08-21）：档位 ≠off 时下发官位——共识插件按官在内层白名单加菜
-      //（对齐+task_original / 博识+web_search / 实证+run_verify，专属排他）；off 档不带 = 老表零变化
-      return { ...s, persona: EFFORT_PERSONAS[officer][level], title: `${OFFICER_META[officer].name}·${EFFORT_LEVEL_LABEL[level]}`, officer }
-    })
-  }
-  function resolveSoulList(list, enabledIn) {
+  function resolveSouls() {
     const unified = current.unified ?? base.unified ?? {}
     const fineMode = current.mode === 'fine'
     const out = []
-    for (const s of list) {
-      if (!enabledIn(s)) continue
+    for (const s of rosterSouls()) {
+      if (!s.enabled) continue
       const legacy = current.fine?.[`soul-${s.name}`] ?? {}
-      const pinnedRoute = !fineMode && Boolean(s.provider) && Boolean(s.model)  // 统一模式下的钉定路由（异系魂）
-      const provider = fineMode ? (s.provider || legacy.provider || unified.provider) : (pinnedRoute ? s.provider : unified.provider)
-      const model = fineMode ? (s.model || legacy.model || unified.model) : (pinnedRoute ? s.model : unified.model)
+      const provider = fineMode ? (legacy.provider || unified.provider) : unified.provider
+      const model = fineMode ? (legacy.model || unified.model) : unified.model
       if (!provider || !model) continue // 不可解析的灵魂不下发（共识插件拿到无路由的灵魂只会失联）
-      const temperature = s.temperature ?? legacy.temperature
-      const reasoningEffort = usableEffort(provider, model, s.reasoningEffort)
       out.push({
-        name: s.name,
-        ...(s.title ? { title: s.title } : {}),
-        ...(s.persona ? { persona: s.persona } : {}),
+        name: s.name, title: s.title, persona: s.persona, officer: s.officer,
         provider, model,
-        // 统一模式：灵魂跟随对话框（会话）当前选的模型——共识插件用主请求的 provider/model 覆盖这里的 unified 值；
-        // unified 值仍是中枢 AI（手术刀/记忆/画布）的路由与主请求无路由时的兜底。钉定路由的异系魂不跟随。
-        ...(fineMode || pinnedRoute ? {} : { followMain: true }),
-        ...(temperature === undefined ? {} : { temperature }),
-        ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(fineMode ? {} : { followMain: true }),
+        temperature: s.temperature,
         enabled: true,
       })
     }
@@ -359,19 +248,18 @@ export function apply(ctx, config = {}) {
       ...(c.nearIdenticalSimilarity ?? b.nearIdenticalSimilarity) !== undefined ? { nearIdenticalSimilarity: c.nearIdenticalSimilarity ?? b.nearIdenticalSimilarity } : {},
       ...(c.statusHeartbeatMs ?? b.statusHeartbeatMs) !== undefined ? { statusHeartbeatMs: c.statusHeartbeatMs ?? b.statusHeartbeatMs } : {},
       // 数组两枚：schema 对缺键物化 []，与「用户显式空数组」不可区分——非空才下发，空 = 回落下一层（base → 插件默认）
-      ...(c.jsonSchemaProviders?.length ? { jsonSchemaProviders: c.jsonSchemaProviders } : b.jsonSchemaProviders?.length ? { jsonSchemaProviders: b.jsonSchemaProviders } : {}),
       ...(c.exemptHostTools?.length ? { exemptHostTools: c.exemptHostTools } : b.exemptHostTools?.length ? { exemptHostTools: b.exemptHostTools } : {}),
     }
   }
-  /** 监控/设置用的 AI 元数据：固定四个 + 当前列表里的每个灵魂（含停用的，recent 表要能标注旧调用）。
-   *  effort 覆盖只改 persona/title 不改魂名——soul-A 位在档位变化时归因不断流（历史 stats 键恒定）。 */
+  /** 监控/设置用的 AI 元数据：固定四个 + 名册三魂（含停用的，recent 表要能标注旧调用）。
+   *  魂名跨魂数恒定——soul-A 位在魂数变化时归因不断流（历史 stats 键恒定）。 */
   function aiMeta() {
     const meta = { ...AI_META }
-    for (const s of (Array.isArray(current.souls) ? current.souls : [])) {
-      meta[`soul-${s.name}`] = { label: soulLabel(s), role: '共识盲写/融合/表决', soul: s.name, ...(s.title ? { title: s.title } : {}), enabled: s.enabled !== false }
+    for (const s of rosterSouls()) {
+      meta[`soul-${s.name}`] = { label: soulLabel(s), role: '共识盲写/表决', soul: s.name, ...(s.title ? { title: s.title } : {}), enabled: s.enabled }
     }
     for (const id of Object.keys(stats)) {
-      if (id.startsWith('soul-') && !(id in meta)) meta[id] = { label: `灵魂 ${id.slice(5)}`, role: '共识盲写/融合/表决（已不在列表）', soul: id.slice(5), enabled: false }
+      if (id.startsWith('soul-') && !(id in meta)) meta[id] = { label: `灵魂 ${id.slice(5)}`, role: '共识盲写/表决（已不在列表）', soul: id.slice(5), enabled: false }
     }
     return meta
   }
@@ -379,13 +267,13 @@ export function apply(ctx, config = {}) {
     const souls = resolveSouls() ?? []
     return {
       mode: current.mode,
+      soulCount: soulCountOf(),
       memoryScope: current.memoryScope ?? base.memoryScope ?? 'full',
       userRetirement: (current.userRetirement ?? base.userRetirement) === true,
-      effort: (({ bound: _b, ...g }) => g)(effortLevelsOf(undefined)),   // 三魂 effort 全局默认档（会话级绑定见 /trisoul/api/soul-effort）
       unified: current.unified ?? {},
       fine: current.fine ?? {},
       consensus: resolveConsensus(),
-      souls: Array.isArray(current.souls) ? current.souls : [],
+      souls: rosterSouls(),   // 全名册 + 启用位（设置页「当前生效路由」与会话头部魂数用）
       base,
       resolved: Object.fromEntries([
         ...HUB_AI_IDS.map(id => [id, resolveAi(id)]),
@@ -406,25 +294,17 @@ export function apply(ctx, config = {}) {
   ctx.on('trisoul/memory-scope', () => current.memoryScope ?? base.memoryScope ?? 'full', { global: true })
   // ⑧ 用户原话退役开关（默认关）：canvas 圈区 / surgeon 执法每次动刀前查询，改设置即刻生效
   ctx.on('trisoul/user-retirement', () => (current.userRetirement ?? base.userRetirement) === true, { global: true })
-  // 共识插件每轮开始查询：ctx.bail('trisoul/souls', sessionId?) → [{ name, title?, persona?, provider, model, temperature?, reasoningEffort?, enabled:true }]
-  // 只含 enabled；无 settings 配置（列表为空）时 undefined → 共识插件退回 cordis 静态 souls
-  ctx.on('trisoul/souls', (sessionId) => resolveSouls(sessionId), { global: true })
-
-  // ---------- 三魂 effort 解析：档位 = 会话绑定 > 全局 settings.effort > 全 off ----------
-  /** 该会话的三栏有效档（会话绑定 > 全局 settings.effort > 全 off）；bound = 是否有会话级绑定。
-   *  档位经 resolveSouls 按位套到启用列表前三个灵魂的 persona 上（≠off = 覆盖，off = 库内老表人设）——
-   *  无独立 bail：共识插件照旧只拉 trisoul/souls，personas 随列表下发。 */
-  function effortLevelsOf(sessionId) {
-    const bound = sessionId ? sessionEffort[sessionId] : undefined
-    const g = current.effort ?? base.effort ?? {}
-    const norm = (v) => (EFFORT_LEVELS.includes(v) ? v : 'off')
-    const pickLv = (o) => norm(bound?.[o] ?? g[o])
-    return { align: pickLv('align'), erudite: pickLv('erudite'), empiric: pickLv('empiric'), bound: !!bound }
-  }
+  // 共识插件每轮开始查询：ctx.bail('trisoul/souls', sessionId?) → [{ name, title, persona, officer, provider, model, temperature, followMain?, enabled:true }]
+  // 只含启用魂（前 soulCount 条）；路由无一可解析时 undefined → 共识插件退回 cordis 静态 souls。sessionId 忽略（会话级绑定已拆）
+  ctx.on('trisoul/souls', () => resolveSouls(), { global: true })
+  // 渠道协议（2026-08-30 格式锁按协议）：共识插件 / 记忆中枢按 provider 问「这渠道说什么协议」，据此挑格式锁字段。
+  // 来源：不经桥的内建适配器固定表；桥自定义渠道读宿主 settings `llm-pi-ai.providers.<id>.api`（用户在 dsh 设置→模型填的就是它；
+  // 桥内建预设不写 api → undefined，插件请求时再从 pi-ai 递来的 model.api 探明）。只读不写、不校验、不落盘。
+  ctx.on('trisoul/provider-api', (provider) => protocolOf(provider), { global: true })
 
   // ---------- 2. 监控：llm/stream 归因统计 ----------
   const stats = Object.fromEntries([...HUB_AI_IDS, 'main'].map(id => [id, freshStat()]))
-  for (const s of base.souls ?? []) if (s.enabled !== false) stats[`soul-${s.name}`] = freshStat()
+  for (const s of SOUL_ROSTER) stats[`soul-${s.name}`] = freshStat()
   const recent = []
   // ---------- 2.1 会话分桶：监控按会话看（轮次 / 时间线 / 最近调用），全局视图跨会话合并 ----------
   // 每会话保留最近 ROUNDS_KEEP 轮全文、TIMELINE_KEEP 条时间线（每次 LLM 调用 / 手术 / 状态区 / 探针 / 记忆动作 / 共识步起止）
@@ -493,19 +373,19 @@ export function apply(ctx, config = {}) {
       winsBySoul: {},           // 胜者分布 name → 次数（winner/identical/single/solo；分母=各值之和）
       picksByLabel: {},         // 票选中的候选编号分布（选票顺序已随机化——编号分布明显不均=位置偏置回归；两魂互审「不放行」单独一桶）
       duration: { sum: 0, count: 0 }, // 完成轮次耗时 ms（非 aborted）
-      // v2 tips 闸门（接替 v1 收编，2026-08-22）：claim 非空率见 salvage.withClaim；solo = 独走触发数、final = 收官补一轮数
+      // v2 tips 闸门（接替 v1 收编，2026-08-22）：知情率见 divergence.withFork；solo = 独走触发数、final = 收官补一轮数
       tips: {
         rounds: 0,              // 触发 tips 的轮数（phase:'tips' 事件数；一轮至多一次）
-        claims: 0,              // claim 总数（败魂自陈「我有什么可补充」）
+        claims: 0,              // 送达胜者的平行时间线条数（2026-08-28 起 = tips 条目数：分叉 / reference / unassessed）
         solo: 0,                // dest:'solo'——工具步挂账，下一步胜者独走吸收
         final: 0,               // dest:'final'——收官步放行前胜者补一轮吸收
       },
       // v2 独走步：单发胜者魂吸收挂账 tips（无盲写无表决）；失败 → 丢弃 tips 回退共识
       solo: { runs: 0, failed: 0 },
-      // D1 salvage 位（票面恒带 salvage 键）：非空率 = withClaim/ballots = claim 闸门通过率（tips 触发的上游信号）
-      salvage: {
-        ballots: 0,             // 带 salvage 位的选票总数（分母）
-        withClaim: 0,           // salvage 非空的票数
+      // divergence 位（2026-08-28 表决重设计，接替 salvage：票面恒带 divergence 键）：非空率 = withFork/ballots = 知情票率
+      divergence: {
+        ballots: 0,             // 带 divergence 位的选票总数（分母）
+        withFork: 0,            // divergence 非空的票数（知情票）
       },
       innerByTool: {},          // 内层取证按工具名计数（H 专属工具使用率：task_original / web_search / run_verify 等）
     },
@@ -580,7 +460,7 @@ export function apply(ctx, config = {}) {
     const text = String(purpose)
     const slash = text.indexOf('/')
     const head = slash < 0 ? text : text.slice(0, slash)
-    const who = slash < 0 ? '' : text.slice(slash + 1) // 名字禁 '/'（validateSoulList），但归因对脏 purpose 也要稳：取整个余部
+    const who = slash < 0 ? '' : text.slice(slash + 1) // 名册魂名不含 '/'，但归因对脏 purpose 也要稳：取整个余部
     // v2 灵魂调用只剩 draft/vote 两 purpose（融合稿 trisoul-merge 与批准票 trisoul-approve 已随 v1 退役）
     if (head === 'trisoul-draft' || head === 'trisoul-vote') {
       return { id: who ? `soul-${who}` : 'main', stage: head.replace('trisoul-', '') }
@@ -739,6 +619,8 @@ export function apply(ctx, config = {}) {
       retries: Array.isArray(d.retries) ? d.retries.map(x => ({ attempt: x?.attempt ?? null, error: cap(String(x?.error ?? '')) })) : [],
       truncated: d.truncated === true,
       innerRounds: typeof d.innerRounds === 'number' ? d.innerRounds : 0,
+      // 补枪记录（2026-08-29 补漏：插件 draftInfo 一直带 mend，这里没接——真机排查只能靠活捉；高频 = 该渠道盲写依从差）
+      ...(d.mend && typeof d.mend === 'object' ? { mend: { kind: d.mend.kind ?? null, reason: cap(String(d.mend.reason ?? '')), attempts: typeof d.mend.attempts === 'number' ? d.mend.attempts : 1, durationMs: d.mend.durationMs ?? null, ...(d.mend.autofilled ? { autofilled: true } : {}) } } : {}),
       // 盲写多步思考链（2026-08-25 用户令）：取证 trail 每轮的 raw reasoning 透传（漏掉它=UI 只能看实时 inner 事件）
       inner: Array.isArray(d.inner) ? d.inner.map(x => ({ name: x?.name ?? null, args: cap(String(x?.args ?? '')), chars: x?.chars ?? 0, ok: x?.ok !== false, durationMs: x?.durationMs ?? null, ...(x?.reasoning ? { reasoning: String(x.reasoning) } : {}) })) : [],
     })
@@ -833,7 +715,7 @@ export function apply(ctx, config = {}) {
       return
     }
     if (info.phase === 'tips') {
-      // v2 tips 闸门：败魂指向胜稿的非空 salvage = claim——工具步挂账下一步独走（dest:'solo'）/ 收官步放行前补一轮（dest:'final'）
+      // v2 tips 闸门：败者时间线（分叉 / 全量送稿）→ 工具步挂账下一步独走（dest:'solo'）/ 收官步放行前补一轮（dest:'final'）
       const claims = Array.isArray(info.claims) ? info.claims : []
       metrics.consensus.tips.rounds++
       metrics.consensus.tips.claims += claims.length
@@ -898,8 +780,8 @@ export function apply(ctx, config = {}) {
             // picks = [灵魂名]（每魂 1 票只投别人），labels = 选票上的编号；空 picks 且非「不放行」= 弃权
             metrics.consensus.ballots += Math.max(1, v.picks.length)
             if (v.picks.length === 0 && v.reject !== true) metrics.consensus.abstentions++
-            // D1 salvage 位（v2 票面恒带 salvage 键，空串也算带位）：非空 = 有 claim（tips 闸门的触发信号）
-            if ('salvage' in v) { metrics.consensus.salvage.ballots++; if (typeof v.salvage === 'string' && v.salvage.trim()) metrics.consensus.salvage.withClaim++ }
+            // divergence 位（票面恒带 divergence 键，空串也算带位）：非空 = 知情票（tips 触发 + 平票破平的信号）
+            if ('divergence' in v) { metrics.consensus.divergence.ballots++; if (typeof v.divergence === 'string' && v.divergence.trim()) metrics.consensus.divergence.withFork++ }
             { const via = v.via === 'tool' || v.via === 'text' ? v.via : (v.picks.length === 0 || v.via === 'none') ? 'none' : 'text'; metrics.consensus.ballotVia[via]++ }
             if (typeof v.attempts === 'number' && v.attempts > 1 && v.parsed !== false && v.picks.length > 0) metrics.consensus.retryRecovered++
             for (const lb of (Array.isArray(v.labels) ? v.labels : [])) bumpKey(metrics.consensus.picksByLabel, String(lb))
@@ -927,14 +809,15 @@ export function apply(ctx, config = {}) {
         ...(typeof v?.parsed === 'boolean' ? { parsed: v.parsed } : {}),
         ...(v?.via === 'tool' || v?.via === 'text' || v?.via === 'none' ? { via: v.via } : {}),
         ...(typeof v?.raw === 'string' && v.raw ? { raw: cap(v.raw) } : {}),
-        ...(typeof v?.salvage === 'string' && v.salvage.trim() ? { salvage: cap(v.salvage) } : {}),
+        ...(typeof v?.divergence === 'string' && v.divergence.trim() ? { divergence: cap(v.divergence) } : {}),
         reason: cap(v?.reason ?? null), reasoning: cap(v?.reasoning ?? null),
       })) : []
       votes.forEach(v => noteSoul(r, v.soul))
       r.votes.push({ round: info.round ?? r.votes.length + 1, total: info.total ?? null, votes,
         ...(info.decision ? { decision: info.decision, ballots: info.ballots ?? null,
           counts: Array.isArray(info.counts) ? info.counts.map(c => ({ soul: soulName(c?.soul), votes: c?.votes ?? 0 })) : null,
-          winner: soulName(info.winner) ?? null, tie: info.tie === true } : {}) })
+          winner: soulName(info.winner) ?? null, tie: info.tie === true,
+          ...(typeof info.tieKind === 'string' ? { tieKind: info.tieKind } : {}) } : {}) })
     } else if (info.phase === 'done') {
       // 评测：结果分布 / 全票·免表决·降级 / 每魂胜率 / 平均耗时（aborted 不进率的分母与均值）
       {
@@ -1196,9 +1079,8 @@ export function apply(ctx, config = {}) {
     return {
       ts: Date.now(),
       config: snapshotConfig(),
-      // 已解析的启用灵魂（顺序=列表顺序）：监控卡片按此生成；persona 只给摘要（全文在 config.souls）。
-      // 会话作用域必须传 sessionId——effort 会话绑定会换 title/persona，无参恒全局档会让卡片与真跑的人设对不上
-      souls: (resolveSouls(sessionId || undefined) ?? []).map(s => ({ ...s, ...(s.persona ? { persona: summarize(s.persona) } : {}) })),
+      // 已解析的启用灵魂（顺序=名册顺序）：监控卡片按此生成；persona 只给摘要（全文在 config.souls）
+      souls: (resolveSouls() ?? []).map(s => ({ ...s, ...(s.persona ? { persona: summarize(s.persona) } : {}) })),
       ai: aiMeta(),
       // 会话作用域：?sessionId= 时组件状态（stats / 共识摘要）、轮次、时间线、最近调用只给该会话；否则全局累计
       stats: b ? sessionStats(b) : stats,
@@ -1209,8 +1091,6 @@ export function apply(ctx, config = {}) {
       memoryScope: b ? memoryScopeOf(b.id) : null,
       // ⑫ 上下文框架：该会话最新一步盲写请求的消息结构投影 + 各魂 cacheReadTokens（缓存命中分界线）；全局视图 null
       contextFrame: b ? (contextFrames.get(b.id) ?? null) : null,
-      // 三魂 effort：会话作用域 = 该会话有效档（绑定 > 全局，直接按 sessionId 解析、不依赖监控桶存在），全局视图 = 全局默认档；officers 带每栏映射魂名（监控 pill 用）
-      soulEffort: (() => { const { bound, ...effort } = effortLevelsOf(sessionId || undefined); return { effort, bound, officers: officersWire(sessionId || undefined) } })(),
       scope: b ? { sessionId: b.id } : { sessionId: null },
       sessions: [...sessions.values()].filter(x => x.rounds.length || x.timeline.length).sort((x, y) => y.lastAt - x.lastAt).map(sessionSummary),
       consensusRounds: (b ? b.rounds : rounds).map(roundSummary),
@@ -1255,16 +1135,15 @@ export function apply(ctx, config = {}) {
           if (body.mode !== undefined) patch.mode = body.mode
           if (body.memoryScope !== undefined) patch.memoryScope = body.memoryScope
           if (body.userRetirement !== undefined) patch.userRetirement = body.userRetirement
-          if (body.effort !== undefined) patch.effort = body.effort   // 三魂 effort 全局默认档（schema 校验档位）
+          if (body.soulCount !== undefined) {
+            // 1~3 整数；null/字符串/越界都响亮拒绝（schema 对 null 会当缺省回 3，这里先拦）。旧 souls/effort 键不认
+            if (!SOUL_COUNTS.includes(body.soulCount)) return json(res, 400, { error: `soulCount 必须是 ${SOUL_COUNTS.join(' / ')}（收到 ${JSON.stringify(body.soulCount)}）` })
+            patch.soulCount = body.soulCount
+          }
           if (body.unified !== undefined) patch.unified = body.unified
           if (body.fine !== undefined) patch.fine = body.fine
           if (body.consensus !== undefined) patch.consensus = body.consensus
-          if (body.souls !== undefined) {
-            if (!Array.isArray(body.souls)) return json(res, 400, { error: 'souls 必须是数组（整体替换）' })
-            patch.souls = body.souls.map(sanitizeSoul)
-          }
-          const checked = SettingsSchema(patch) // 先过 schema：非法值响亮拒绝，不写盘
-          if (patch.souls !== undefined) validateSoulList(checked.souls, { requireNonEmpty: true }) // 名字唯一 + 至少 1 个启用（单魂模式）
+          SettingsSchema(patch) // 先过 schema：非法值响亮拒绝，不写盘
           await scope.update(patch)
         }
         current = scope.get()
@@ -1321,48 +1200,5 @@ export function apply(ctx, config = {}) {
     }
   }, 'trisoul-api: /trisoul/api/consensus/stream')
 
-  // ---------- 三魂 effort（composer 面板）：会话级档位绑定，随时可切、下一共识轮生效 ----------
-  // 三栏按位映射启用列表前三个灵魂（第 i 栏 ↔ 第 i 魂）；soul = 该栏当前映射的魂名（不足三魂时 null，面板标灰）
-  const officersWire = (sessionId) => {
-    const names = (resolveSouls(sessionId) ?? []).map(s => s.name)
-    return EFFORT_OFFICERS.map((o, i) => ({ key: o, ...OFFICER_META[o], levels: [...EFFORT_LEVELS], soul: names[i] ?? null }))
-  }
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'exact', path: '/trisoul/api/soul-effort',
-    handler: async (req, res) => {
-      try {
-        if (req.method === 'GET') {
-          const url = new URL(req.url ?? '/', 'http://local')
-          const sid = url.searchParams.get('sessionId')
-          if (!sid) return json(res, 400, { error: 'sessionId 必填' })
-          const { bound, ...effort } = effortLevelsOf(sid)
-          return json(res, 200, { effort, bound, global: (() => { const { bound: _b, ...g } = effortLevelsOf(undefined); return g })(), officers: officersWire(sid) })
-        }
-        if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        const body = await readJson(req)
-        const sid = typeof body.sessionId === 'string' && body.sessionId.trim() ? body.sessionId.trim() : ''
-        if (!sid) return json(res, 400, { error: 'sessionId 必填' })
-        if (body.effort === null) {
-          delete sessionEffort[sid]
-          persistSessions()
-          const { bound, ...effort } = effortLevelsOf(sid)
-          return json(res, 200, { effort, bound })
-        }
-        if (!body.effort || typeof body.effort !== 'object' || Array.isArray(body.effort)) return json(res, 400, { error: 'effort 必须是 { align, erudite, empiric } 或 null（解绑跟随全局）' })
-        const next = {}
-        for (const o of EFFORT_OFFICERS) {
-          const v = body.effort[o] ?? 'off'
-          if (!EFFORT_LEVELS.includes(v)) return json(res, 400, { error: `effort.${o} 非法档位：${String(v)}（可用：${EFFORT_LEVELS.join(' / ')}）` })
-          next[o] = v
-        }
-        sessionEffort[sid] = next
-        persistSessions()
-        ctx.logger?.info(`trisoul-api: 会话 ${sid} 绑定三魂 effort ${EFFORT_OFFICERS.map(o => `${o}=${next[o]}`).join(' ')}`)
-        const { bound, ...effort } = effortLevelsOf(sid)
-        return json(res, 200, { effort, bound })
-      } catch (e) { json(res, 400, { error: String(e?.message ?? e) }) }
-    },
-  }), 'trisoul-api: /trisoul/api/soul-effort')
-
-  ctx.logger?.info('trisoul-api: 已注册 /trisoul/api/state, /trisoul/api/settings, /trisoul/api/consensus, /trisoul/api/soul-effort')
+  ctx.logger?.info('trisoul-api: 已注册 /trisoul/api/state, /trisoul/api/settings, /trisoul/api/consensus')
 }

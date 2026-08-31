@@ -79,8 +79,8 @@ window.__ModuleLoader__.load({
 			...project ? { project } : {}
 		});
 		//#endregion
-		//#region \0dsh-css:packages/client/memory-ui/src/client/MemoryPanel.module.css.mjs
-		const css$1 = ".LxiJIa_panel{background:var(--dsw-alias-bg-base);height:100%;min-height:0;color:var(--dsw-alias-label-primary);font:var(--dsw-font-xs-13);font-family:var(--dsw-font-family);flex-direction:column;display:flex}.LxiJIa_header{border-bottom:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);flex-direction:column;gap:8px;padding:12px 16px 10px;display:flex}.LxiJIa_headingRow{align-items:center;gap:8px;display:flex}.LxiJIa_title{font:var(--dsw-font-s-14);color:var(--dsw-alias-label-primary);margin:0;font-weight:600}.LxiJIa_spacer{flex:1}.LxiJIa_toolbar{align-items:center;gap:8px;display:flex}.LxiJIa_toolbar>*{flex:1;min-width:0}.LxiJIa_meta{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary);flex-wrap:wrap;gap:4px 12px;display:flex}.LxiJIa_metaItem{text-overflow:ellipsis;white-space:nowrap;max-width:100%;overflow:hidden}.LxiJIa_list{flex-direction:column;flex:1;gap:8px;min-height:0;padding:10px 12px 16px;display:flex;overflow-y:auto}.LxiJIa_placeholder,.LxiJIa_placeholderError{text-align:center;font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-tertiary);padding:24px 12px}.LxiJIa_placeholderError{color:var(--dsw-alias-state-error-primary)}.LxiJIa_item{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:6px;padding:10px 12px;transition:border-color .15s,background-color .15s}.LxiJIa_itemHeader{font:var(--dsw-font-xxs-12);justify-content:space-between;align-items:center;margin-bottom:6px;display:flex}.LxiJIa_itemIndex{color:var(--dsw-alias-state-business-primary);font-weight:600}.LxiJIa_itemTime{color:var(--dsw-alias-label-tertiary)}.LxiJIa_itemText{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-secondary);white-space:pre-wrap;word-break:break-word}@media (prefers-reduced-motion:reduce){.LxiJIa_item{transition:none}}.LxiJIa_filters{flex-wrap:wrap;align-items:center;gap:6px;display:flex}.LxiJIa_tag{height:18px;font:var(--dsw-font-xxxs-11);white-space:nowrap;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);border-radius:4px;align-items:center;padding:0 6px;font-weight:600;line-height:18px;display:inline-flex}.LxiJIa_tagProject{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}.LxiJIa_tagCross{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}.LxiJIa_tagGlobal{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary)}.LxiJIa_tagSession{color:var(--dsw-alias-label-secondary);border-color:var(--dsw-alias-label-secondary)}.LxiJIa_itemKey{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;max-width:40%;overflow:hidden}.LxiJIa_stateLabel{font:var(--dsw-font-xxxs-11);color:var(--dsw-alias-label-tertiary);border:1px dashed var(--dsw-alias-border-l3);white-space:nowrap;border-radius:4px;height:18px;padding:0 6px;line-height:18px}.LxiJIa_itemSuperseded{opacity:.55}.LxiJIa_itemSuperseded .LxiJIa_itemText{text-decoration:line-through;text-decoration-color:var(--dsw-alias-border-l3)}.LxiJIa_itemSuperseded:hover{opacity:.85}.LxiJIa_itemFooter{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary);align-items:center;gap:8px;min-width:0;margin-top:6px;display:flex}.LxiJIa_itemProject,.LxiJIa_itemCreated{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.LxiJIa_history{border-top:1px dashed var(--dsw-alias-border-l2);border-left:2px solid var(--dsw-alias-border-l2);flex-direction:column;gap:6px;margin:8px 0 0;padding:8px 0 0 12px;list-style:none;display:flex}.LxiJIa_historyItem{flex-direction:column;gap:2px;display:flex}.LxiJIa_historyMeta{font:var(--dsw-font-xxxs-11);color:var(--dsw-alias-label-tertiary)}.LxiJIa_historyText{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-secondary);white-space:pre-wrap;word-break:break-word}.LxiJIa_actionError{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-state-error-primary);white-space:pre-wrap;word-break:break-word}.LxiJIa_itemEditing{border-color:var(--dsw-alias-brand-primary)}.LxiJIa_itemEditing:hover{background:var(--dsw-alias-bg-layer-1)}.LxiJIa_form{flex-direction:column;gap:8px;min-width:0;display:flex}.LxiJIa_formHead{flex-wrap:wrap;align-items:center;gap:6px;display:flex}.LxiJIa_formTitle{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-primary);font-weight:600}.LxiJIa_formLabel{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-secondary);white-space:nowrap;flex:none}.LxiJIa_textarea{box-sizing:border-box;resize:vertical;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);width:100%;min-height:64px;color:var(--dsw-alias-label-primary);font:var(--dsw-font-xs-13);font-family:var(--dsw-font-family);border-radius:8px;outline:none;padding:6px 8px;line-height:20px}.LxiJIa_textarea::placeholder{color:var(--dsw-alias-label-dimmed)}.LxiJIa_textarea:focus{border-color:var(--dsw-alias-brand-primary)}.LxiJIa_textarea:disabled{opacity:.6}.LxiJIa_formRow{flex-wrap:wrap;gap:8px 12px;display:flex}.LxiJIa_formField{flex:1;align-items:center;gap:6px;min-width:200px;display:flex}.LxiJIa_formField>:last-child{flex:1;min-width:0}.LxiJIa_formActions{align-items:center;gap:8px;min-width:0;display:flex}.LxiJIa_formHint{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-state-warn-primary);min-width:0}.LxiJIa_actions{flex:none;align-items:center;gap:10px;display:inline-flex}.LxiJIa_linkButton{appearance:none;cursor:pointer;font:var(--dsw-font-xxs-12);color:var(--dsw-alias-brand-primary);white-space:nowrap;background:0 0;border:none;padding:0}.LxiJIa_linkButton:hover{text-decoration:underline}.LxiJIa_linkButton:disabled{cursor:default;opacity:.5;text-decoration:none}.LxiJIa_linkDanger{color:var(--dsw-alias-state-error-primary)}.LxiJIa_projectTrigger{justify-content:space-between;gap:6px;min-width:96px;max-width:220px}.LxiJIa_projectTriggerEmpty{color:var(--dsw-alias-label-tertiary)}.LxiJIa_projectTriggerLabel{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.LxiJIa_caret{color:var(--dsw-alias-label-tertiary);flex:none}.LxiJIa_header{gap:8px;padding:10px 14px 8px}.LxiJIa_viewSwitch{border:1px solid var(--dsw-alias-border-l2);border-radius:6px;display:inline-flex;overflow:hidden}.LxiJIa_viewBtn{appearance:none;cursor:pointer;font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-secondary);white-space:nowrap;background:0 0;border:0;padding:2px 10px}.LxiJIa_viewBtn+.LxiJIa_viewBtn{border-left:1px solid var(--dsw-alias-border-l2)}.LxiJIa_viewBtn:hover{background:var(--dsw-alias-interactive-bg-hover)}.LxiJIa_viewBtn[aria-selected=true]{background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-on-brand,#fff);font-weight:600}.LxiJIa_viewBtn:disabled{cursor:default;opacity:.5}.LxiJIa_search{flex:200px;min-width:160px}.LxiJIa_search>*{width:100%}.LxiJIa_sessionStrip{background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-interactive-bg-hover));font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums;border-radius:6px;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:5px 10px;display:flex}.LxiJIa_sessionItem{white-space:nowrap;text-overflow:ellipsis;max-width:100%;overflow:hidden}.LxiJIa_sessionLabel{color:var(--dsw-alias-label-tertiary)}.LxiJIa_sessionSep{background:var(--dsw-alias-border-l2);width:1px;height:12px}.LxiJIa_meta{font:var(--dsw-font-xxxs-11);gap:2px 10px}.LxiJIa_list{gap:8px;padding:10px 14px 16px}.LxiJIa_item{border-left:3px solid var(--dsw-alias-border-l3);padding:9px 12px 8px;position:relative}.LxiJIa_item[data-scope=project]{border-left-color:var(--dsw-alias-state-business-primary)}.LxiJIa_item[data-scope=cross]{border-left-color:var(--dsw-alias-brand-primary)}.LxiJIa_item[data-scope=global]{border-left-color:var(--dsw-alias-state-warn-primary)}.LxiJIa_itemKey{color:var(--dsw-alias-label-primary);max-width:50%;font-weight:600}.LxiJIa_itemFooter{font:var(--dsw-font-xxxs-11);margin-top:6px}.LxiJIa_touchedBadge{height:18px;font:var(--dsw-font-xxxs-11);color:var(--dsw-alias-brand-primary);background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent);white-space:nowrap;border-radius:4px;align-items:center;padding:0 6px;font-weight:600;display:inline-flex}.LxiJIa_actions{opacity:0;transition:opacity .12s}.LxiJIa_item:hover .LxiJIa_actions,.LxiJIa_item:focus-within .LxiJIa_actions{opacity:1}@media (hover:none){.LxiJIa_actions{opacity:1}}.LxiJIa_history{border-left-color:var(--dsw-alias-border-l3)}.LxiJIa_search{flex:220px;min-width:0;max-width:340px;display:flex}.LxiJIa_search>*{flex:1;width:auto;min-width:0}.LxiJIa_infoRow{flex-wrap:wrap;align-items:center;gap:4px 12px;min-width:0;display:flex}.LxiJIa_sessionStrip{background:0 0;gap:4px 6px;padding:3px 0}.LxiJIa_sessionItem{background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-interactive-bg-hover));font:var(--dsw-font-xxxs-11);color:var(--dsw-alias-label-primary);border-radius:999px;align-items:center;gap:4px;padding:1px 8px;display:inline-flex}.LxiJIa_sessionSep{display:none}.LxiJIa_meta{flex-wrap:nowrap;overflow:hidden}.LxiJIa_item{border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);border-left-width:3px;border-radius:8px;padding:10px 14px 9px}.LxiJIa_item:hover{border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1)}.LxiJIa_item[data-scope=project]:hover,.LxiJIa_item[data-scope=cross]:hover,.LxiJIa_item[data-scope=global]:hover{border-left-color:inherit}.LxiJIa_itemHeader{gap:8px;margin-bottom:5px}.LxiJIa_tag{border:0;border-radius:4px;height:17px;padding:0 6px;font-weight:600;line-height:17px}.LxiJIa_tagProject{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent)}.LxiJIa_tagCross{color:var(--dsw-alias-brand-primary);background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)}.LxiJIa_tagGlobal{color:var(--dsw-alias-state-warn-primary);background:color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent)}.LxiJIa_tagSession{color:var(--dsw-alias-label-secondary);background:color-mix(in srgb, var(--dsw-alias-label-secondary) 12%, transparent)}.LxiJIa_itemKey{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-primary);max-width:55%;font-weight:600}.LxiJIa_itemTime{font:var(--dsw-font-xxxs-11)}.LxiJIa_itemText{color:var(--dsw-alias-label-secondary);line-height:1.6}.LxiJIa_itemFooter{gap:10px;margin-top:7px}.LxiJIa_itemFooter .LxiJIa_linkButton{font:var(--dsw-font-xxxs-11)}.LxiJIa_touchedBadge{height:17px}.LxiJIa_checkbox{appearance:auto;accent-color:var(--dsw-alias-brand-primary);cursor:pointer;flex:none;width:14px;height:14px;margin:0}.LxiJIa_checkbox:disabled{cursor:default;opacity:.5}.LxiJIa_itemSelected{border-color:var(--dsw-alias-brand-primary);background:color-mix(in srgb, var(--dsw-alias-brand-primary) 5%, var(--dsw-alias-bg-layer-1))}.LxiJIa_itemSelected:hover{border-color:var(--dsw-alias-brand-primary)}.LxiJIa_batchBar{border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);bottom:var(--dsh-composer-height,0px);z-index:1;border:1px solid var(--dsw-alias-border-l2);border-bottom:none;border-radius:10px 10px 0 0;flex-wrap:wrap;flex:none;align-items:center;gap:6px 10px;padding:8px 14px;display:flex;position:sticky}.LxiJIa_batchCount{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-primary);white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:600}.LxiJIa_batchLabel{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary);white-space:nowrap}.LxiJIa_batchNotice{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.LxiJIa_batchSep{background:var(--dsw-alias-border-l2);flex:none;width:1px;height:14px}.LxiJIa_batchDanger{color:var(--dsw-alias-state-error-primary)}";
+		//#region \0dsh-css:/Users/mac/Projects/trisoul/packages/client/memory-ui/src/client/MemoryPanel.module.css.mjs
+		const css$1 = ".LxiJIa_panel{background:var(--dsw-alias-bg-base);height:100%;min-height:0;color:var(--dsw-alias-label-primary);font:var(--dsw-font-xs-13);font-family:var(--dsw-font-family);flex-direction:column;display:flex}.LxiJIa_header{border-bottom:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);flex-direction:column;gap:8px;padding:12px 16px 10px;display:flex}.LxiJIa_headingRow{align-items:center;gap:8px;display:flex}.LxiJIa_title{font:var(--dsw-font-s-14);color:var(--dsw-alias-label-primary);margin:0;font-weight:600}.LxiJIa_spacer{flex:1}.LxiJIa_meta{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary);flex-wrap:wrap;gap:4px 12px;display:flex}.LxiJIa_metaItem{text-overflow:ellipsis;white-space:nowrap;max-width:100%;overflow:hidden}.LxiJIa_list{flex-direction:column;flex:1;gap:8px;min-height:0;padding:10px 12px 16px;display:flex;overflow-y:auto}.LxiJIa_placeholder,.LxiJIa_placeholderError{text-align:center;font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-tertiary);padding:24px 12px}.LxiJIa_placeholderError{color:var(--dsw-alias-state-error-primary)}.LxiJIa_item{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:6px;padding:10px 12px;transition:border-color .15s,background-color .15s}.LxiJIa_itemHeader{font:var(--dsw-font-xxs-12);justify-content:space-between;align-items:center;margin-bottom:6px;display:flex}.LxiJIa_itemTime{color:var(--dsw-alias-label-tertiary)}.LxiJIa_itemText{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-secondary);white-space:pre-wrap;word-break:break-word}@media (prefers-reduced-motion:reduce){.LxiJIa_item{transition:none}}.LxiJIa_filters{flex-wrap:wrap;align-items:center;gap:6px;display:flex}.LxiJIa_tag{height:18px;font:var(--dsw-font-xxxs-11);white-space:nowrap;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);border-radius:4px;align-items:center;padding:0 6px;font-weight:600;line-height:18px;display:inline-flex}.LxiJIa_tagProject{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}.LxiJIa_tagCross{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}.LxiJIa_tagGlobal{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary)}.LxiJIa_tagSession{color:var(--dsw-alias-label-secondary);border-color:var(--dsw-alias-label-secondary)}.LxiJIa_itemKey{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;max-width:40%;overflow:hidden}.LxiJIa_stateLabel{font:var(--dsw-font-xxxs-11);color:var(--dsw-alias-label-tertiary);border:1px dashed var(--dsw-alias-border-l3);white-space:nowrap;border-radius:4px;height:18px;padding:0 6px;line-height:18px}.LxiJIa_itemSuperseded{opacity:.55}.LxiJIa_itemSuperseded .LxiJIa_itemText{text-decoration:line-through;text-decoration-color:var(--dsw-alias-border-l3)}.LxiJIa_itemSuperseded:hover{opacity:.85}.LxiJIa_itemFooter{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary);align-items:center;gap:8px;min-width:0;margin-top:6px;display:flex}.LxiJIa_itemProject,.LxiJIa_itemCreated{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.LxiJIa_history{border-top:1px dashed var(--dsw-alias-border-l2);border-left:2px solid var(--dsw-alias-border-l2);flex-direction:column;gap:6px;margin:8px 0 0;padding:8px 0 0 12px;list-style:none;display:flex}.LxiJIa_historyItem{flex-direction:column;gap:2px;display:flex}.LxiJIa_historyMeta{font:var(--dsw-font-xxxs-11);color:var(--dsw-alias-label-tertiary)}.LxiJIa_historyText{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-secondary);white-space:pre-wrap;word-break:break-word}.LxiJIa_actionError{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-state-error-primary);white-space:pre-wrap;word-break:break-word}.LxiJIa_itemEditing{border-color:var(--dsw-alias-brand-primary)}.LxiJIa_itemEditing:hover{background:var(--dsw-alias-bg-layer-1)}.LxiJIa_form{flex-direction:column;gap:8px;min-width:0;display:flex}.LxiJIa_formHead{flex-wrap:wrap;align-items:center;gap:6px;display:flex}.LxiJIa_formTitle{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-primary);font-weight:600}.LxiJIa_formLabel{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-secondary);white-space:nowrap;flex:none}.LxiJIa_textarea{box-sizing:border-box;resize:vertical;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);width:100%;min-height:64px;color:var(--dsw-alias-label-primary);font:var(--dsw-font-xs-13);font-family:var(--dsw-font-family);border-radius:8px;outline:none;padding:6px 8px;line-height:20px}.LxiJIa_textarea::placeholder{color:var(--dsw-alias-label-dimmed)}.LxiJIa_textarea:focus{border-color:var(--dsw-alias-brand-primary)}.LxiJIa_textarea:disabled{opacity:.6}.LxiJIa_formRow{flex-wrap:wrap;gap:8px 12px;display:flex}.LxiJIa_formField{flex:1;align-items:center;gap:6px;min-width:200px;display:flex}.LxiJIa_formField>:last-child{flex:1;min-width:0}.LxiJIa_formActions{align-items:center;gap:8px;min-width:0;display:flex}.LxiJIa_formHint{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-state-warn-primary);min-width:0}.LxiJIa_actions{flex:none;align-items:center;gap:10px;display:inline-flex}.LxiJIa_linkButton{appearance:none;cursor:pointer;font:var(--dsw-font-xxs-12);color:var(--dsw-alias-brand-primary);white-space:nowrap;background:0 0;border:none;padding:0}.LxiJIa_linkButton:hover{text-decoration:underline}.LxiJIa_linkButton:disabled{cursor:default;opacity:.5;text-decoration:none}.LxiJIa_linkDanger{color:var(--dsw-alias-state-error-primary)}.LxiJIa_projectTrigger{justify-content:space-between;gap:6px;min-width:96px;max-width:220px}.LxiJIa_projectTriggerEmpty{color:var(--dsw-alias-label-tertiary)}.LxiJIa_projectTriggerLabel{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.LxiJIa_caret{color:var(--dsw-alias-label-tertiary);flex:none}.LxiJIa_header{gap:8px;padding:10px 14px 8px}.LxiJIa_viewSwitch{border:1px solid var(--dsw-alias-border-l2);border-radius:6px;display:inline-flex;overflow:hidden}.LxiJIa_viewBtn{appearance:none;cursor:pointer;font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-secondary);white-space:nowrap;background:0 0;border:0;padding:2px 10px}.LxiJIa_viewBtn+.LxiJIa_viewBtn{border-left:1px solid var(--dsw-alias-border-l2)}.LxiJIa_viewBtn:hover{background:var(--dsw-alias-interactive-bg-hover)}.LxiJIa_viewBtn[aria-selected=true]{background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-on-brand,#fff);font-weight:600}.LxiJIa_viewBtn:disabled{cursor:default;opacity:.5}.LxiJIa_search{flex:200px;min-width:160px}.LxiJIa_search>*{width:100%}.LxiJIa_sessionStrip{background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-interactive-bg-hover));font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums;border-radius:6px;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:5px 10px;display:flex}.LxiJIa_sessionItem{white-space:nowrap;text-overflow:ellipsis;max-width:100%;overflow:hidden}.LxiJIa_sessionLabel{color:var(--dsw-alias-label-tertiary)}.LxiJIa_sessionSep{background:var(--dsw-alias-border-l2);width:1px;height:12px}.LxiJIa_meta{font:var(--dsw-font-xxxs-11);gap:2px 10px}.LxiJIa_list{gap:8px;padding:10px 14px 16px}.LxiJIa_item{border-left:3px solid var(--dsw-alias-border-l3);padding:9px 12px 8px;position:relative}.LxiJIa_item[data-scope=project]{border-left-color:var(--dsw-alias-state-business-primary)}.LxiJIa_item[data-scope=cross]{border-left-color:var(--dsw-alias-brand-primary)}.LxiJIa_item[data-scope=global]{border-left-color:var(--dsw-alias-state-warn-primary)}.LxiJIa_itemKey{color:var(--dsw-alias-label-primary);max-width:50%;font-weight:600}.LxiJIa_itemFooter{font:var(--dsw-font-xxxs-11);margin-top:6px}.LxiJIa_touchedBadge{height:18px;font:var(--dsw-font-xxxs-11);color:var(--dsw-alias-brand-primary);background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent);white-space:nowrap;border-radius:4px;align-items:center;padding:0 6px;font-weight:600;display:inline-flex}.LxiJIa_actions{opacity:0;transition:opacity .12s}.LxiJIa_item:hover .LxiJIa_actions,.LxiJIa_item:focus-within .LxiJIa_actions{opacity:1}@media (hover:none){.LxiJIa_actions{opacity:1}}.LxiJIa_history{border-left-color:var(--dsw-alias-border-l3)}.LxiJIa_search{flex:220px;min-width:0;max-width:340px;display:flex}.LxiJIa_search>*{flex:1;width:auto;min-width:0}.LxiJIa_infoRow{flex-wrap:wrap;align-items:center;gap:4px 12px;min-width:0;display:flex}.LxiJIa_sessionStrip{background:0 0;gap:4px 6px;padding:3px 0}.LxiJIa_sessionItem{background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-interactive-bg-hover));font:var(--dsw-font-xxxs-11);color:var(--dsw-alias-label-primary);border-radius:999px;align-items:center;gap:4px;padding:1px 8px;display:inline-flex}.LxiJIa_sessionSep{display:none}.LxiJIa_meta{flex-wrap:nowrap;overflow:hidden}.LxiJIa_item{border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);border-left-width:3px;border-radius:8px;padding:10px 14px 9px}.LxiJIa_item:hover{border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1)}.LxiJIa_item[data-scope=project]:hover,.LxiJIa_item[data-scope=cross]:hover,.LxiJIa_item[data-scope=global]:hover{border-left-color:inherit}.LxiJIa_itemHeader{gap:8px;margin-bottom:5px}.LxiJIa_tag{border:0;border-radius:4px;height:17px;padding:0 6px;font-weight:600;line-height:17px}.LxiJIa_tagProject{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent)}.LxiJIa_tagCross{color:var(--dsw-alias-brand-primary);background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)}.LxiJIa_tagGlobal{color:var(--dsw-alias-state-warn-primary);background:color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent)}.LxiJIa_tagSession{color:var(--dsw-alias-label-secondary);background:color-mix(in srgb, var(--dsw-alias-label-secondary) 12%, transparent)}.LxiJIa_itemKey{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-primary);max-width:55%;font-weight:600}.LxiJIa_itemTime{font:var(--dsw-font-xxxs-11)}.LxiJIa_itemText{color:var(--dsw-alias-label-secondary);line-height:1.6}.LxiJIa_itemFooter{gap:10px;margin-top:7px}.LxiJIa_itemFooter .LxiJIa_linkButton{font:var(--dsw-font-xxxs-11)}.LxiJIa_touchedBadge{height:17px}.LxiJIa_checkbox{appearance:auto;accent-color:var(--dsw-alias-brand-primary);cursor:pointer;flex:none;width:14px;height:14px;margin:0}.LxiJIa_checkbox:disabled{cursor:default;opacity:.5}.LxiJIa_itemSelected{border-color:var(--dsw-alias-brand-primary);background:color-mix(in srgb, var(--dsw-alias-brand-primary) 5%, var(--dsw-alias-bg-layer-1))}.LxiJIa_itemSelected:hover{border-color:var(--dsw-alias-brand-primary)}.LxiJIa_batchBar{border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);bottom:var(--dsh-composer-height,0px);z-index:1;border:1px solid var(--dsw-alias-border-l2);border-bottom:none;border-radius:10px 10px 0 0;flex-wrap:wrap;flex:none;align-items:center;gap:6px 10px;padding:8px 14px;display:flex;position:sticky}.LxiJIa_batchCount{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-primary);white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:600}.LxiJIa_batchLabel{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary);white-space:nowrap}.LxiJIa_batchNotice{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.LxiJIa_batchSep{background:var(--dsw-alias-border-l2);flex:none;width:1px;height:14px}.LxiJIa_batchDanger{color:var(--dsw-alias-state-error-primary)}";
 		const tagId$1 = "@trisoul/dsh-client-memory-ui/MemoryPanel.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$1) + "]") === null) {
 			const tag = document.createElement("style");
@@ -91,72 +91,70 @@ window.__ModuleLoader__.load({
 		}
 		var MemoryPanel_module_css_default = {
 			"itemSelected": "LxiJIa_itemSelected",
-			"itemIndex": "LxiJIa_itemIndex",
-			"itemSuperseded": "LxiJIa_itemSuperseded",
-			"formActions": "LxiJIa_formActions",
-			"projectTriggerEmpty": "LxiJIa_projectTriggerEmpty",
-			"sessionStrip": "LxiJIa_sessionStrip",
-			"sessionItem": "LxiJIa_sessionItem",
-			"infoRow": "LxiJIa_infoRow",
-			"toolbar": "LxiJIa_toolbar",
-			"history": "LxiJIa_history",
-			"checkbox": "LxiJIa_checkbox",
-			"headingRow": "LxiJIa_headingRow",
-			"itemEditing": "LxiJIa_itemEditing",
-			"historyMeta": "LxiJIa_historyMeta",
-			"batchCount": "LxiJIa_batchCount",
-			"tagGlobal": "LxiJIa_tagGlobal",
-			"search": "LxiJIa_search",
-			"panel": "LxiJIa_panel",
-			"touchedBadge": "LxiJIa_touchedBadge",
-			"tagSession": "LxiJIa_tagSession",
-			"title": "LxiJIa_title",
-			"textarea": "LxiJIa_textarea",
-			"tagProject": "LxiJIa_tagProject",
 			"tagCross": "LxiJIa_tagCross",
-			"stateLabel": "LxiJIa_stateLabel",
-			"meta": "LxiJIa_meta",
-			"itemTime": "LxiJIa_itemTime",
-			"actions": "LxiJIa_actions",
-			"itemKey": "LxiJIa_itemKey",
-			"itemHeader": "LxiJIa_itemHeader",
-			"viewSwitch": "LxiJIa_viewSwitch",
-			"viewBtn": "LxiJIa_viewBtn",
-			"itemFooter": "LxiJIa_itemFooter",
-			"batchNotice": "LxiJIa_batchNotice",
-			"batchDanger": "LxiJIa_batchDanger",
-			"filters": "LxiJIa_filters",
-			"placeholder": "LxiJIa_placeholder",
-			"list": "LxiJIa_list",
-			"actionError": "LxiJIa_actionError",
-			"item": "LxiJIa_item",
+			"formActions": "LxiJIa_formActions",
 			"itemText": "LxiJIa_itemText",
-			"caret": "LxiJIa_caret",
-			"sessionLabel": "LxiJIa_sessionLabel",
-			"placeholderError": "LxiJIa_placeholderError",
-			"historyText": "LxiJIa_historyText",
-			"itemProject": "LxiJIa_itemProject",
-			"form": "LxiJIa_form",
-			"sessionSep": "LxiJIa_sessionSep",
-			"tag": "LxiJIa_tag",
-			"batchSep": "LxiJIa_batchSep",
-			"spacer": "LxiJIa_spacer",
-			"itemCreated": "LxiJIa_itemCreated",
-			"historyItem": "LxiJIa_historyItem",
-			"formHead": "LxiJIa_formHead",
-			"header": "LxiJIa_header",
-			"projectTriggerLabel": "LxiJIa_projectTriggerLabel",
-			"formLabel": "LxiJIa_formLabel",
-			"formRow": "LxiJIa_formRow",
 			"linkButton": "LxiJIa_linkButton",
-			"linkDanger": "LxiJIa_linkDanger",
-			"projectTrigger": "LxiJIa_projectTrigger",
-			"metaItem": "LxiJIa_metaItem",
+			"touchedBadge": "LxiJIa_touchedBadge",
+			"list": "LxiJIa_list",
+			"itemSuperseded": "LxiJIa_itemSuperseded",
+			"panel": "LxiJIa_panel",
+			"formHead": "LxiJIa_formHead",
+			"caret": "LxiJIa_caret",
+			"tagProject": "LxiJIa_tagProject",
+			"search": "LxiJIa_search",
+			"placeholderError": "LxiJIa_placeholderError",
+			"itemCreated": "LxiJIa_itemCreated",
+			"filters": "LxiJIa_filters",
+			"historyText": "LxiJIa_historyText",
+			"sessionLabel": "LxiJIa_sessionLabel",
+			"stateLabel": "LxiJIa_stateLabel",
+			"formHint": "LxiJIa_formHint",
+			"projectTriggerLabel": "LxiJIa_projectTriggerLabel",
+			"itemFooter": "LxiJIa_itemFooter",
+			"checkbox": "LxiJIa_checkbox",
+			"infoRow": "LxiJIa_infoRow",
+			"itemProject": "LxiJIa_itemProject",
+			"tagSession": "LxiJIa_tagSession",
+			"actionError": "LxiJIa_actionError",
+			"tag": "LxiJIa_tag",
+			"batchDanger": "LxiJIa_batchDanger",
+			"meta": "LxiJIa_meta",
+			"textarea": "LxiJIa_textarea",
+			"projectTriggerEmpty": "LxiJIa_projectTriggerEmpty",
+			"placeholder": "LxiJIa_placeholder",
 			"batchLabel": "LxiJIa_batchLabel",
+			"item": "LxiJIa_item",
+			"sessionItem": "LxiJIa_sessionItem",
+			"headingRow": "LxiJIa_headingRow",
+			"formRow": "LxiJIa_formRow",
+			"itemKey": "LxiJIa_itemKey",
+			"batchCount": "LxiJIa_batchCount",
 			"formField": "LxiJIa_formField",
-			"batchBar": "LxiJIa_batchBar",
+			"tagGlobal": "LxiJIa_tagGlobal",
+			"header": "LxiJIa_header",
+			"itemEditing": "LxiJIa_itemEditing",
+			"metaItem": "LxiJIa_metaItem",
 			"formTitle": "LxiJIa_formTitle",
-			"formHint": "LxiJIa_formHint"
+			"batchBar": "LxiJIa_batchBar",
+			"historyMeta": "LxiJIa_historyMeta",
+			"sessionSep": "LxiJIa_sessionSep",
+			"itemTime": "LxiJIa_itemTime",
+			"viewBtn": "LxiJIa_viewBtn",
+			"actions": "LxiJIa_actions",
+			"title": "LxiJIa_title",
+			"itemHeader": "LxiJIa_itemHeader",
+			"form": "LxiJIa_form",
+			"viewSwitch": "LxiJIa_viewSwitch",
+			"batchSep": "LxiJIa_batchSep",
+			"projectTrigger": "LxiJIa_projectTrigger",
+			"formLabel": "LxiJIa_formLabel",
+			"batchNotice": "LxiJIa_batchNotice",
+			"sessionStrip": "LxiJIa_sessionStrip",
+			"historyItem": "LxiJIa_historyItem",
+			"spacer": "LxiJIa_spacer",
+			"linkDanger": "LxiJIa_linkDanger",
+			"history": "LxiJIa_history"
 		};
 		//#endregion
 		//#region src/client/MemoryPanel.tsx
@@ -998,7 +996,7 @@ window.__ModuleLoader__.load({
 			});
 		}
 		//#endregion
-		//#region \0dsh-css:packages/client/memory-ui/src/client/MemoryScopeChip.module.css.mjs
+		//#region \0dsh-css:/Users/mac/Projects/trisoul/packages/client/memory-ui/src/client/MemoryScopeChip.module.css.mjs
 		const css = ".u4RsKW_chip{color:var(--dsw-alias-label-secondary);cursor:pointer;white-space:nowrap;background:0 0;border:none;border-radius:8px;align-items:center;gap:4px;padding:4px 8px;font-family:inherit;font-size:12px;line-height:20px;display:inline-flex}.u4RsKW_chip:hover{background:var(--dsw-alias-interactive-bg-hover)}.u4RsKW_locked{cursor:default;color:var(--dsw-alias-label-tertiary)}.u4RsKW_locked:hover{background:0 0}.u4RsKW_label{color:var(--dsw-alias-label-tertiary)}.u4RsKW_value{color:inherit}.u4RsKW_caret{color:var(--dsw-alias-label-tertiary);font-size:9px}.u4RsKW_item{flex-direction:column;align-items:flex-start;gap:1px;display:flex}.u4RsKW_itemDesc{color:var(--dsw-alias-label-tertiary);white-space:normal;max-width:240px;font-size:11px}";
 		const tagId = "@trisoul/dsh-client-memory-ui/MemoryScopeChip.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
@@ -1011,11 +1009,11 @@ window.__ModuleLoader__.load({
 		var MemoryScopeChip_module_css_default = {
 			"itemDesc": "u4RsKW_itemDesc",
 			"chip": "u4RsKW_chip",
-			"item": "u4RsKW_item",
-			"label": "u4RsKW_label",
 			"value": "u4RsKW_value",
+			"label": "u4RsKW_label",
 			"locked": "u4RsKW_locked",
-			"caret": "u4RsKW_caret"
+			"caret": "u4RsKW_caret",
+			"item": "u4RsKW_item"
 		};
 		//#endregion
 		//#region src/client/MemoryScopeChip.tsx

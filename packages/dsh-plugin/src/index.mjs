@@ -3,13 +3,16 @@
 // 【v2 流程】（2026-08-21 定稿 + 2026-08-22 补枪定型，见 CONTRACT.md 共识条目）：同一请求换 provider/persona N 路盲写
 // （交稿走 submit_draft 工具：蒸馏思考拆 BDI 三格 findings/plan/action + 预输出 output（2026-08-25 换芯，
 //   见 submitDraftToolSchema）；内层取证循环多轮照旧；缺封皮 → 同上下文单工具补枪，不重写全稿）
-// → 匿名表决一次（每魂 1 票、只投别人；salvage 自陈「我有什么可补充」= tips 闸门）
+// → 匿名表决一次（每魂 1 票、只投别人；票面文字 = divergence「我 vs 我投的稿」的实质分叉，空 = 干净背书；
+//   reason/salvage 于 2026-08-28 双删——票理由六成比文风、指控进不了 tips 链，见 bench/deepswe/reports-0827r2 §3.2/3.3——评测报告目录不入库，本机保留）
 // → 胜稿放行（重放剥 raw reasoning；收官步 thinking 折进 reasoning 块、output 做正文，均取自工具参数）
-// → 有 claim：工具步挂账、下一次同会话请求胜者独走吸收 tips；收官步放行前胜者补一轮。
-// 平票轮换定胜者；融合稿、批准票、收编修订、选票截断均已删除（2026-08-22 文本两段式改工具交稿）。
+// → 有分叉 / 平票 / 弃权：败者时间线打包成 tips（分叉行 + 全稿，拆信路由标「针对你 / 附稿之间 / 未评估」）；
+//   工具步挂账、下一次同会话请求胜者独走吸收；收官步放行前胜者补一轮。
+// 平票破平（tallyVotes 阶梯）：全空同质→轮换；恰一张利益无关知情票→它投谁谁胜；三知情票真僵局→轮换+补比+全量送稿；
+// 故障态→轮换+全量送稿。融合稿、批准票、收编修订、选票截断均已删除（2026-08-22 文本两段式改工具交稿）。
 // 胜者块放行时 tool-call 结构零破坏。
-// 【三魂 effort】（2026-08-21 用户纠偏定稿）：对齐/博识/实证是三张魂不是审稿官——档位由 dsh-api 经 trisoul/souls
-// 直接套在前三魂的 persona 上（off=库内老表人设，轻/标准/猛=补偿人设全文覆盖），本插件零改动零感知。
+// 【三官 = 三张魂】（2026-08-21 用户纠偏定稿；2026-08-30 档位制退役改灵魂数量制）：对齐/博识/实证是灵魂不是审稿官——
+// 官位/人设由 dsh-api 按魂数（1=博识 2=对齐+实证 3=全三官）经 trisoul/souls 套好下发（人设恒猛档），本插件零改动零感知。
 // （历史注：8ea08ec/f799d74 曾做成「主笔盲写+三官审计门禁」，与用户意图相悖，已整条拆除。）
 // 主循环判据：无 purpose 字段（一切辅助调用——压缩/标题/本插件自身——都带 purpose），
 // 故本插件零依赖，也无拦截递归（我们的辅助调用带 trisoul-* purpose 直接穿透；
@@ -29,7 +32,7 @@
 //         ├ 票数最高（含 2 魂互相放行）→ 放行            done{mode:'winner', result:'winner'}
 //         ├ 全员弃权（超时/解析失败）→ 按轮次轮换取一份  done{mode:'winner', result:'winner', tie:true}
 //         └ 平票（≥3 魂 1-1-1 环投；2 魂互不放行）→ 按轮次轮换取一份直接放行（无融合轮）
-//   表决后：败魂非空 salvage = claim
+//   表决后：败者时间线打包成 tips（有分叉 / 平票弃权全量送稿；胜者自己那张票恒排除）
 //     ├ 胜稿含工具调用 → tips 挂账（per-session），下一次同会话请求 = 独走步：
 //     │    不跑共识、单发胜者魂（tips=请求内末尾 user 直令，②），输出直接放行   done{mode:'solo', result:'solo'}
 //     │    独走失败 → 丢弃 tips 回退正常共识步（本轮流按共识结果收尾，solo 事件带 error）
@@ -59,7 +62,9 @@
 // - pi-ai 的 replayedAssistant 要求 replayState.blocks 数 == 消息块数且 provider/model 与消息 source 一致：
 //   只要本流发过旁白块、或胜者路由 ≠ 主路由、或胜者带 raw reasoning 块（重放被剥）、或胜者出自私有上下文
 //   （收官补一轮的 tips 直令 / 取证轮），重放时必须剥掉 replayState 走 foreignAssistant 正门，
-//   否则下一轮 INVALID_REPLAY_STATE；同理 stripNoteBlocks 剥块后也一并剥 source.replayState
+//   否则下一轮 INVALID_REPLAY_STATE；同理 stripNoteBlocks 剥块后也一并剥 source.replayState。
+//   例外（2026-08-29）：内层取证/补枪的私有上下文回灌走 nativeAssistantOf——同魂同路由原样带回
+//   （思考块 + replayState 都在），正是 replayedAssistant 的设计场景；块数不齐时它自动降级 plugin source
 // - 超时：每次灵魂调用（draft/vote）都带两档超时——soulIdleTimeoutMs（默认 60s 无新 chunk 判失联，
 //   每来一块重置）+ soulTimeoutMs（默认 15m 总上限，兜底）。Ark 流会挂起不结束，
 //   collect() 用 AbortController 合并上游 signal + 定时器，并对 iterator.next() 做 race——
@@ -72,18 +77,16 @@
 //   经 smallJobEffort() 能力门控——只有该路由声明了 off 档才传，否则 undefined（提供商默认）。
 //   consensus-config 可配 voteEffort（'off'|'inherit'，默认 'off'）。盲写/独走/收官补一轮继承主请求的档位与 tools
 // - 灵魂调用的 purpose 统一 `trisoul-draft/<name>` / `trisoul-vote/<name>`：@trisoul/dsh-api 按段归因灵魂用量
-// - 动态灵魂列表：每轮开始 `ctx.bail('trisoul/souls')` 取 @trisoul/dsh-api 的实时列表（用户可增删），
+// - 动态灵魂列表：每轮开始 `ctx.bail('trisoul/souls')` 取 @trisoul/dsh-api 的实时列表（名册 A/B/C 按 soulCount 取前几个），
 //   undefined 或可用条目 0 时退回 cordis 静态 souls（静态路径保留逐魂 trisoul/ai-config 覆盖）；1 条 = 单魂模式
 // - trisoul/consensus 事件 phase 集合固定 {start, draft, vote, tips, solo, done}（dsh-api 聚合按此分派）：
 //   tips = 表决后谁 claim 了什么（dest: 'solo' 挂账独走 | 'final' 收官补一轮）；solo = 独走步执行（胜者魂、tips 数、耗时）；
 //   done.result ∈ {identical, winner, solo, failed, single, all-dead, aborted}；single 双态：mode:'single'=配置态单魂（正常）/ mode:'fallback'=多魂死剩一个（降级）
 //   过程相位 {inner, retry, mend} 只走内存供排查（mend = 缺封皮补枪：draftInfo.mend 同步带 reason/attempts）
 
-import { execFile } from 'node:child_process'
-import { existsSync, realpathSync } from 'node:fs'
-import { resolve as resolvePath, join as joinPath, sep as pathSep } from 'node:path'
 import { smallJobEffort } from './effort.mjs'
 export { smallJobEffort } from './effort.mjs'
+import { TASK_MAP_TOOL, VERIFY_LINK_TOOL, TODO_TOOL, isTodoSnapshot, todosOf, TODO_NUDGE, TODO_EMPTY_NUDGE, taskMapSchema, verifyLinkSchema, todoToolDefinition, createTodoStore } from './todolist.mjs'
 
 export const name = 'trisoul-consensus'
 // agents/tools：内层工具（辩论期取证）要用 ctx.agents.get(sessionId) 拿到主 agent、ctx.tools.execute 跑只读工具
@@ -115,7 +118,7 @@ const DEFAULT_REPLAY_REASONING = 'off'
  * （2026-08-25 真机病例：三魂并发盲写触发 Ark 突发保护，固定 1s 齐重试全灭）。
  * 只对「再试可能不同」的失败重试：空闲超时 / 流错误·断流 / 空响应 / 网络与限流；
  * 不重试：上游取消、总上限用尽、配置类错误（UNSUPPORTED_* / NO_ADAPTER / 4xx 鉴权与参数错）。
- * 表决额外：选票不含 JSON 或被输出上限截断 → 重试并按尝试序号放大 maxTokens（推理模型思考吃预算）。
+ * 表决额外：选票不含 JSON 或被输出上限截断 → 重试；配了 voteMaxTokens（>0）时按尝试序号放大，默认 0=不设限则同参重发（推理模型思考吃预算）。
  * 总时长受同一 soulTimeoutMs 约束（各次尝试共享剩余预算），不会因重试把一轮拖到几倍上限。
  * 另一半防线 soulStaggerMs：盲写/收官并发发起时按魂序错峰，压瞬时突发。
  */
@@ -125,9 +128,9 @@ const DEFAULT_SOUL_STAGGER_MS = 250
 const RATE_LIMIT_RE = /\b429\b|RequestBurstTooFast|TooManyRequests|RateLimit|rate.?limit|burst/i
 const RATE_LIMIT_BACKOFF_X = 3
 /**
- * 内层工具（辩论期取证，⑬ 2026-08-23 瘦身）：只剩官位专属工具——align=task_original、erudite=web 透传、
- * empiric=run_verify；基础只读套（read/glob/grep/trisoul_recall）与预算闸（innerCalls/innerRounds/
- * innerResultChars/innerTotalChars）已整体拆除——通用取证归外层主循环（内层工具面与主 agent 重复，
+ * 内层工具（辩论期取证，⑬ 2026-08-23 瘦身；08-28 todolist 重构换名）：只剩官位专属工具——align=task_map、
+ * erudite=web 透传、empiric=verify_link（旧 task_original / run_verify 已退役）；基础只读套（read/glob/grep/trisoul_recall）
+ * 与预算闸（innerCalls/innerResultChars/innerTotalChars）已整体拆除、只剩 innerRounds（0=不限）——通用取证归外层主循环（内层工具面与主 agent 重复，
  * 真机实测只会推高步数），结果照旧只喂回该灵魂私有上下文、其它灵魂看不到；
  * 稿里含任何非专属工具的调用 → 整稿按「外层提案」处理（胜出后由外层循环执行）。
  * 开关：innerEvidence 布尔（默认开；false = 关内层，officer 专属工具也不放行）
@@ -143,23 +146,25 @@ const DEFAULT_INNER_ROUNDS = 0
  */
 const DEFAULT_STATUS_HEARTBEAT_MS = 5_000
 /**
- * T2（工单 v6）盲写协议按渠道自适应的判据：这些 provider 走 JSON 强制输出（json_schema strict 语法锁），
- * 其余渠道原样留在「tool 面板 + 直令软纪律」那条路上，一个字节不改。
- * 白名单而非能力探测：能力探测要么多打一次请求、要么猜，而这件事的真相是逐个网关实测出来的——
- *   ark-agent（api: openai-responses，plan/v3 网关）2026-08-25 实测 `text:{format:{type:'json_schema',
- *   strict:true,schema}}` 是真锁：明令「忽略 schema 用散文回答」输出仍是合法 schema JSON，
- *   越界字段被 additionalProperties:false 物理挡住，思考链完好，大字符串完好，污染历史（function_call
- *   项在 input 里）照样 200；
- *   官方渠道（dsh-llm-deepseek）实测 400「This response_format type is unavailable now」，弱版
- *   json_object 锁不住（挂 read 工具 + 明令直调时照样发出 read）。
- * 名字比对规范化（大小写 + 连字符/下划线无关）：配置里写 ark-agent / arkagent / ARK_AGENT 都算同一个。
+ * T2 格式锁按协议（2026-08-30 用户拍板「所有渠道默认挂锁」，取代按渠道名认的 jsonSchemaProviders / jsonObjectProviders 两份白名单）：
+ *   openai-responses   → json_schema 锁走 Responses 的 `text.format`（ark-agent 2026-08-25 实测真锁：明令「忽略 schema 用散文回答」
+ *                        输出仍是合法 schema JSON，越界字段被 additionalProperties:false 物理挡住，思考链完好，大字符串完好）
+ *   openai-completions → 同一份 schema 走 chat 的 `response_format:{type:'json_schema',json_schema:{name,strict,schema}}`（OpenAI / 火山 chat / vLLM 同字段；
+ *                        网关不认这个 type 会 400——那是渠道没跟上，传输层重试用尽后按失联处理，旁白 [格式锁] 已写明渠道与协议）
+ *   deepseek（内建官方适配器 dsh-llm-deepseek）→ json_object 语法锁（官方 400「This response_format type is unavailable now」拒 json_schema；
+ *                        2026-08-29 探针实测 json_object 语法级真锁——散文物理吐不出，唯一逃逸是空 content，走 callSoul 空响应重试 / 解析失败兜底一枪）
+ *   其它已知协议（anthropic-messages / google-* …）→ 无格式锁可挂，走软路线（tool 面板 + submit_draft），旁白明说
+ *   协议未知（宿主没说、本进程还没见过该渠道的请求）→ 首发走软路线；请求经过 onPayload 时从 pi-ai 递来的 model.api 探明，下一步起按协议上锁
+ * 协议来源（按序）：静态 souls 的 api 字段（无头评测 dockerkit 同款写法）→ 本进程探明缓存 → ADAPTER_API 固定表
+ *   → ctx.bail('trisoul/provider-api', provider)（dsh-api 读宿主桥 settings `llm-pi-ai.providers.<id>.api`，用户在 dsh 设置→模型填的自定义渠道都在那）。
+ * 不做能力探测：探测要么多打一次请求、要么猜；协议是宿主已知的事实，问宿主即可。
  */
-const DEFAULT_JSON_SCHEMA_PROVIDERS = Object.freeze(['ark-agent'])
-const providerKey = (p) => String(p ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
-/** 该 provider 是否走 JSON 强制输出路线（白名单 list 为空 = 全渠道走软路线） */
-export function usesJsonSchema(provider, list) {
-  if (!providerKey(provider)) return false
-  return (Array.isArray(list) ? list : []).some(x => providerKey(x) === providerKey(provider))
+export const LOCK_BY_API = Object.freeze({ 'openai-responses': 'schema', 'openai-completions': 'schema', deepseek: 'object' })
+/** 不经 pi-ai 桥的内建适配器：provider id 固定、协议固定——不是可配置的渠道名，不算白名单 */
+export const ADAPTER_API = Object.freeze({ 'deepseek-official': 'deepseek' })
+/** 协议 → 门：'schema' | 'object' | null（null = 软路线；协议未知同样 null——首发软路线，探明后再上锁） */
+export function jsonDoorForApi(api) {
+  return (typeof api === 'string' && LOCK_BY_API[api]) || null
 }
 /** P2-4 近似免表决的正文相似度阈值（词面 Jaccard；工具调用还须语义相似才触发）。
  * 2026-08-21 用户拍板放宽：0.85 → 0.7——真机 68 步 0 命中实锤太严（11 步高趋同仍白白表决），
@@ -168,10 +173,19 @@ const DEFAULT_NEAR_IDENTICAL_SIMILARITY = 0.7
 /** 结构化选票工具名：表决时只给灵魂这一个工具，让它以工具调用提交选票（pick / reason），不再靠正文 JSON 正则 */
 export const BALLOT_TOOL = 'cast_ballot'
 /**
+ * divergence 字段说明（2026-08-28 表决重设计：reason/salvage 双删，换成「我 vs 我投的稿」分叉陈述）。
+ * 空 = 干净背书（所投稿全方位更好）；非空 = 实质分叉（会改变行为/输出的不同决定）。空不罚、不许硬凑（B4 垫料教训）。
+ * 三个消费点：tips 触发（非空即送胜者）、平票破平（知情票 = divergence 非空）、旁白/监控。
+ * m ≥ 2 与 m = 1（两魂互审）只差指代（the one I picked / this one）。
+ */
+const DIVERGENCE_DESC = Object.freeze({
+  multi: "Where you and the candidate you picked genuinely fork — a call your draft made differently that would change behavior or output, stated as 'mine does X; the one I picked does Y'. Material forks only — not style, wording, or thoroughness. If the candidate you picked is simply better across the board, leave this empty: an empty field is a clean endorsement. Never pad it.",
+  single: "Where you and this draft genuinely fork — a call your draft made differently that would change behavior or output, stated as 'mine does X; this one does Y'. Material forks only — not style, wording, or thoroughness. If it is simply better across the board, leave this empty: an empty field is a clean endorsement. Never pad it.",
+})
+/**
  * cast_ballot 的 JSON Schema（随该投票者看到的候选数 m 生成；m = 存活数 − 1，不含自己那份）。
  * m ≥ 2：pick = 候选编号 1–m（必选 1 份）；m = 1（两魂互审）：pick = 1 放行对方稿 / 0 不能放行。
- * salvage（v2 tips 闸门）：可空——投票人自陈「我有什么可补充」（自己稿里有、所投候选缺的实质内容）；
- * 非空 = claim，触发胜者吸收（工具步 → 下一步独走；收官步 → 放行前补一轮）。
+ * divergence：与所投稿的实质分叉（可空串）——required 里带它是逼模型「有意识地交这个字段」，不是逼有内容。
  */
 export function ballotToolSchema(m) {
   const single = m === 1
@@ -184,10 +198,22 @@ export function ballotToolSchema(m) {
       type: 'object',
       properties: {
         pick: { type: 'integer', minimum: single ? 0 : 1, maximum: m, description: single ? '1 = release this candidate; 0 = cannot release' : `an integer: the candidate number, 1–${m}` },
-        reason: { type: 'string', description: 'One-sentence reason' },
-        salvage: { type: 'string', description: "Optional: substantive content your own draft has that the candidate you picked lacks (a concrete finding / evidence result / risk) — one or two factual sentences; empty string if none" },
+        divergence: { type: 'string', description: single ? DIVERGENCE_DESC.single : DIVERGENCE_DESC.multi },
       },
-      required: ['pick', 'reason'],
+      required: ['pick', 'divergence'],
+    },
+  }
+}
+/** 补比工具（仅三知情票真僵局）：轮换定胜者后，分叉没对准胜者的那个败者对着胜稿再写一次分叉（可空） */
+export const FORK_TOOL = 'state_divergence'
+function forkToolSchema() {
+  return {
+    name: FORK_TOOL,
+    description: 'State where your own draft and the draft shown genuinely fork; empty string if it is simply better across the board or equivalent to yours.',
+    parameters: {
+      type: 'object',
+      properties: { divergence: { type: 'string', description: DIVERGENCE_DESC.single } },
+      required: ['divergence'],
     },
   }
 }
@@ -329,12 +355,35 @@ export function draftJsonSchema(actionTools, evidenceTools) {
   }
 }
 /**
- * 给盲写请求挂 json_schema 硬锁的 payload 改写钩子（Responses API 的 `text.format`）。
+ * 给盲写请求挂 json_schema 硬锁的 payload 改写钩子，字段按协议选：openai-responses → `text.format`；openai-completions →
+ * `response_format.json_schema`。协议取请求时 pi-ai 递来的 model.api（最准——桥内建预设不写 api 时也只有这里知道），
+ * 缺席（内建适配器递的是字符串）退回预判 api，再缺退 text.format（旧默认）。
  * 走的是 pi-ai 原生的 onPayload 钩子；dsh 桥默认把它吃掉，靠 scripts/patch-dsh-bridge.sh 放行。
  * 桥没打补丁 = 钩子递不进去 = 锁不上（但请求照发、软纪律仍在），不会炸——降级而非故障。
  */
-export function jsonSchemaPayload(schema) {
-  return (params) => ({ ...params, text: { format: { type: 'json_schema', ...schema } } })
+export function jsonSchemaPayload(schema, api) {
+  return (params, model) => (model?.api ?? api) === 'openai-completions'
+    ? { ...params, response_format: { type: 'json_schema', json_schema: { name: schema.name, strict: schema.strict, schema: schema.schema } } }
+    : { ...params, text: { format: { type: 'json_schema', ...schema } } }
+}
+/**
+ * chat 门 json_object 语法锁的 payload 改写钩子（官方 JSON Output，2026-08-29）。
+ * 官方内建适配器不走 pi-ai 桥——靠 scripts/patch-dsh-deepseek.sh 给 dsh-llm-deepseek 放行同约定的 onPayload。
+ * 补丁不在位 = 锁不上（请求照发、json 格式块仍在 system 里当软纪律），降级而非故障。
+ */
+export function jsonObjectPayload() {
+  return (params) => ({ ...params, response_format: { type: 'json_object' } })
+}
+/**
+ * json_object 门的 system 格式块：json_schema 进不了这扇门的 payload，整份 schema（含字段语义与可用调用清单的
+ * description）改走 prompt 教学。标题带 "json" 字样——官方文档要求 prompt 必须含该词，否则 400。
+ */
+export function jsonFormatBlock(schema) {
+  return `
+
+## Output format (json)
+Every reply must be exactly one json object and nothing else — no prose, no code fences, nothing before or after it. It must match this JSON Schema (field meanings and available calls live in the descriptions):
+${JSON.stringify(schema.schema)}`
 }
 /**
  * 四格拼合成对外的蒸馏思考正文（历史常驻块 / 候选卡 / 旁白 / tips 共用一个形态）。
@@ -359,94 +408,15 @@ export const SHORT_RAW_CHARS = 400
 /** 蒸馏思考块的标记字段值：block.trisoul === DISTILLED_TAG 的 reasoning 块常驻历史（sanitize 永不剥）。
  *  标记只活在块对象的 JSON 字段上（dsh 按 block-end 原样收块、structuredClone 全保真），模型只见 text。 */
 export const DISTILLED_TAG = 'distilled'
-// ---------- H 三官专属工具（2026-08-21：工具即人设——给纯认知职能物理锚点；与 D 成对：D 给表达位、H 给行动力）----------
+// ---------- H 三官专属工具（2026-08-21 工具即人设；2026-08-28 todolist 重建，蓝图 docs/todolist-tools-spec.md）----------
 // dsh-api 在档位 ≠off 时给魂下发 officer ∈ align|erudite|empiric，本插件按官在内层白名单加菜（专属排他）：
-//   对齐 + task_original（会话用户消息原文清单——手术遮表面不删档，治「对照物被手术侵蚀」）
+//   对齐 + task_map（todo list 结构：transcript/excerpt/add/edit/remove/view，写操作全局生效落共享清单）
 //   博识 + web_search / web_fetch（主请求工具透传；主请求没有 → 自动降级回基础套并旁白标注——评测 netjail 下绝不能联网，红线）
-//   实证 + run_verify（一期最窄只读白名单：node --check / 项目本地 tsc --noEmit；真执行测试等 sandbox 二期）
+//   实证 + verify_link（验证链接：link/run/unlink/view；run 真跑已挂测试文件）
+// 旧 task_original / run_verify 已退役（transcript 并入 task_map；实现在 todolist.mjs）。
 // off 档无 officer 字段 = 白名单/提示零变化（老表对照基线一字节不动，红线）。
-/** 对齐官专属：本会话用户消息原文清单工具名 */
-export const TASK_ORIGINAL_TOOL = 'task_original'
-/** 实证官专属：只读验证工具名 */
-export const RUN_VERIFY_TOOL = 'run_verify'
 /** 博识官透传的主请求联网工具名 */
 export const WEB_TOOLS = Object.freeze(['web_search', 'web_fetch'])
-export function taskOriginalSchema() {
-  return {
-    name: TASK_ORIGINAL_TOOL,
-    description: "Returns the verbatim list of user messages in this session (including later additions, numbered with seq). Use it whenever a decision leans on exactly what the user asked — it puts the original wording right in front of you, instead of you reading from your own memory of it. The text comes from the full session log and is unaffected by context surgery.",
-    parameters: { type: 'object', properties: {} },
-  }
-}
-export function runVerifySchema() {
-  return {
-    name: RUN_VERIFY_TOOL,
-    description: 'Run read-only verification on a file/project (never executes code): kind=node-check runs node --check for JS syntax (requires file); kind=tsc-noemit runs the project-local tsc --noEmit type check (optional cwd for a subproject directory).',
-    parameters: {
-      type: 'object',
-      properties: {
-        kind: { type: 'string', enum: ['node-check', 'tsc-noemit'], description: 'Verification kind' },
-        file: { type: 'string', description: 'Required for node-check: path to the js/mjs/cjs file to check (relative to the session working directory)' },
-        cwd: { type: 'string', description: 'Optional for tsc-noemit: project directory (containing tsconfig and node_modules/.bin/tsc), relative to the session working directory' },
-      },
-      required: ['kind'],
-    },
-  }
-}
-/** 对齐官 task_original 的输出：session 全量日志抽 source.kind==='user' 的原文（手术遮表面不删档，零成本） */
-export function taskOriginalText(session) {
-  const items = []
-  for (const e of session.events) {
-    if (e.type !== 'user/message' || e.data?.source?.kind !== 'user') continue
-    const text = (Array.isArray(e.data.content) ? e.data.content : []).filter(b => b?.type === 'text').map(b => b.text ?? '').join('\n')
-    if (text.trim()) items.push(`${items.length + 1}. [seq ${e.seq}] ${text}`)
-  }
-  return items.length ? `Verbatim user messages in this session (${items.length} total, newest last):\n${items.join('\n')}` : '(No user messages in this session yet)'
-}
-/** 路径围栏：realpath 后必须仍落在会话 cwd 内（按分隔符边界防 /repo-evil 过 /repo 前缀；
- *  realpath 防软链外逃——`node --check` 的语法报错会逐字回显出错行，围栏之外等于任意文件读）。
- *  不存在与越界统一返回 null。 */
-function containedPath(cwd, p) {
-  try {
-    const root = realpathSync(cwd)
-    const real = realpathSync(resolvePath(cwd, p))
-    return real === root || real.startsWith(root + pathSep) ? real : null
-  } catch { return null }
-}
-/** 实证官 run_verify：窄白名单只读检查。一期只有 node --check（不执行）与项目本地 tsc --noEmit。 */
-export function runVerify(args, cwd, signal) {
-  return new Promise((res) => {
-    const done = (ok, text) => res({ ok, text })
-    const kind = args?.kind
-    try {
-      if (kind === 'node-check') {
-        const raw = typeof args.file === 'string' && args.file.trim() ? args.file.trim() : null
-        if (!raw) return done(false, 'node-check requires a file argument')
-        const file = containedPath(cwd, raw)
-        if (!file) return done(false, `File not found (or outside the session working directory): ${raw}`)
-        execFile('node', ['--check', file], { timeout: 60_000, cwd, signal }, (err, stdout, stderr) => {
-          const out = `${stdout ?? ''}${stderr ?? ''}`.trim()
-          done(!err, err ? (out || String(err.message ?? err)) : (out || `Syntax check passed: ${file}`))
-        })
-        return
-      }
-      if (kind === 'tsc-noemit') {
-        // dir 围栏后，能执行的只剩「会话目录内某项目的 node_modules/.bin/tsc」＝跑该项目自己的依赖，
-        // 与 tsc --noEmit 的本职同级；不对 tsc 二进制再做 realpath 围栏（pnpm 的 .bin 软链会指向仓库根 store，二次围栏误伤 monorepo）
-        const dir = typeof args.cwd === 'string' && args.cwd.trim() ? containedPath(cwd, args.cwd.trim()) : cwd
-        if (!dir) return done(false, `Directory not found (or outside the session working directory): ${args.cwd}`)
-        const tsc = joinPath(dir, 'node_modules/.bin/tsc')
-        if (!existsSync(tsc)) return done(false, `No project-local tsc (${tsc} does not exist) — run_verify only uses local dependencies, it never installs from the network`)
-        execFile(tsc, ['--noEmit'], { timeout: 300_000, cwd: dir, signal, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
-          const out = `${stdout ?? ''}${stderr ?? ''}`.trim()
-          done(!err, err ? (out || String(err.message ?? err)) : (out || 'Type check passed (tsc --noEmit, zero errors)'))
-        })
-        return
-      }
-      done(false, `Unknown kind: ${String(kind)} (available: node-check / tsc-noemit)`)
-    } catch (e) { done(false, String(e?.message ?? e)) }
-  })
-}
 
 /** 旁白块的稳定标记：所有 TriSoul 旁白 reasoning 块的文本都以它开头，下游据此剥离 */
 export const NOTE_MARK = '[TriSoul]'
@@ -465,11 +435,31 @@ const PASSTHROUGH = new WeakSet()
  * 接收魂误当事实 → 头部点破「that timeline was not chosen, its output was never actually executed」+
  * 条目标签 Drafted output (never delivered) 逐条自带提醒。
  */
-export function tipsMessage(tips) {
-  // B5 终裁（2026-08-25 用户两裁）：败稿 plan 不单列、不标注——thinking 即四格拼合文（findings/plan/action），
-  // plan 随之自然传递；头部「平行时空的你」框架语已足够定性，勿再夹带 Planned:/「未采纳」类形式。
-  const list = tips.map(t => `— Memo (claims to add: ${t.claim})\nThinking: ${t.thinking}\nDrafted output (never delivered): ${t.output}`).join('\n\n')
-  return mkMsg('tips', `A memo from you in a parallel timeline — that timeline was not chosen, and its output was never actually executed. What's worth keeping is the analysis and the leads; judge their merit yourself.\n\n${list}\n\nUse it only for this reply: fold in whatever holds up, ignore the rest, and don't mention this memo or where it came from.`)
+/**
+ * 2026-08-28 表决重设计后的 tips 形态：每条 = 该败者时间线的「分叉行」+ 全稿。
+ * tips[].kind 决定分叉行（拆信路由，插件按 pick/perm 机械判定，模型零参与）：
+ *   'pointed'     分叉针对胜稿（作者投了胜者，或补比产物）
+ *   'between'     分叉写在两份附稿之间（作者投了别的败者；故障态 / 补比失联时出现）
+ *   'reference'   有效票但无分叉（干净背书）——只在全量送稿时附上
+ *   'unassessed'  弃权魂（熔断/超时，未完成评估）——稿件原样附上
+ * framing：'winner' 明胜版 / 'rotation' 轮换版（掷硬币不冒充授权，只换首句；尾句同款）。
+ * B5 终裁不变：败稿 plan 不单列、不标注——thinking 即四格拼合文，plan 随之自然传递。
+ */
+export function tipsMessage(tips, { framing = 'winner' } = {}) {
+  const forkLine = (t) => {
+    const d = String(t.divergence ?? '').trim()
+    switch (t.kind) {
+      case 'between': return `— This timeline forked from another attached timeline — not necessarily from yours; check where your draft stands: ${d}`
+      case 'unassessed': return '— This timeline was cut short and produced no assessment; its draft is attached unexamined.'
+      case 'reference': return '— This timeline recorded no fork against the draft it endorsed; attached for reference.'
+      default: return `— This timeline forked from your current draft: ${d}`
+    }
+  }
+  const list = tips.map(t => `${forkLine(t)}\nThinking: ${t.thinking}\nDrafted output (never delivered): ${t.output}`).join('\n\n')
+  const head = framing === 'rotation'
+    ? 'A memo from you in parallel timelines — they diverged here with no verdict between them, and this path continues by default; their output never actually ran in your environment. The forks in them may carry leads worth having; judge their value yourself.'
+    : 'A memo from you in a parallel timeline — that timeline was not chosen, and its output never actually ran in your environment. The forks in it may carry leads worth having; judge their value yourself.'
+  return mkMsg('tips', `${head}\n\n${list}\n\nThis memo exists only in this request. Don't mention this memo or where it came from in the output field.`)
 }
 
 /** 四格教学块（①②③三条直令共用；B3 四格行=B1/B2 短句版，action/output 照旧不动）。
@@ -488,11 +478,11 @@ const BRIDGE_TRAILER = `Execution entries go in the fields — never issue tool 
 submit_draft({"findings":"…","plan":"","action":"Reading the config to check the timeout.","output":"","actions":[{"name":"read","arguments":{"file_path":"src/config.mjs"}}],"files":[],"edits":[]})`
 /** B8④ span 两态的第二态：取证喂回 / 补枪共用（覆盖本步至今的全部取证往返） */
 const SPAN_SO_FAR = 'this step so far (including all evidence round-trips)'
-/** 三官专属工具说明（①路径 1 括号内；先说是什么→为你而设点破自身缺陷→参数→何时用，
- *  根子对准五条小模型缺陷清单：对齐=指令遵循差/需求缩水，实证=推理天花板+幻觉不自知，博识=知识边界） */
-export const DEDICATED_BLURBS = {
-  align: `a tool for seeing the user's actual words. It exists because of you: as you work you drift — wandering off on your own reading, shrinking the requirements without noticing, and after context compression all you hold is a paraphrase. This tool puts the verbatim text of every user message in this session back in front of you — a numbered complete list, newest last, untouched by compression — so you can check what you're doing against the actual words for drift and shrinkage. No parameters; just call it`,
-  empiric: `a tool for testing code against reality. It exists because of you: your multi-step reasoning goes wrong, you don't notice when it does, and re-checking in your head uses the same head — so don't verify with your mind, verify with reality: run one check and the result tells you directly whether you're right. Read-only, never executes code. kind is required, one of two: node-check — runs node --check on a js/mjs/cjs file you just wrote to catch syntax errors, requires file (relative to the session working directory); tsc-noemit — runs the project-local tsc --noEmit to catch type errors, cwd optionally points at a subproject. After writing code, before you say it's fine, call it`,
+/** 三官专属工具说明（①路径 1 括号内；align/empiric 取拍板 description 首句 + 面板指路——工具说明书唯一的家在
+ *  spec 定稿的 description（面板/lookup 栏原文在场），这里不另写第二份说法，防两处分叉） */
+const DEDICATED_BLURBS = {
+  align: `creates and edits the todo list anchored to the user's own wording, used in medium-to-large tasks to raise the completion rate — full op manual on the tool panel`,
+  empiric: `the tasks' verification-link tool, used to raise the real completion rate of the todo list — full op manual on the tool panel`,
   erudite: `tools for filling knowledge gaps from the web. They exist because of you: your knowledge has a boundary, and facts beyond it written from memory are made up — without you noticing. These tools search / fetch web pages, turning "I don't know" into "it's in my context", replacing your memory with sourced facts. Parameters are on the tool panel. For any fact you're not sure of, look it up before writing it; finding nothing is a finding too — say so honestly`,
 }
 /** ① 盲写请求末尾·分岔直令（2026-08-23 夜定稿；2026-08-24 停车修复用户锤定——路径行明说「交稿+动作同回复」、
@@ -518,7 +508,7 @@ ${BRIDGE_TRAILER}`
  *  （旧「两路固定节奏」拍板被推翻——真机混合稿防呆分支反复命中，就是它想续挖被掐的痕迹）。
  *  dedicated = { label }（该魂专属工具名；①已给过完整说明，这里不重复 blurb，每轮重灌会白涨输入）；
  *  拿不到专属工具名 → 退化为只有交稿一条路。 */
-export function evidenceReturnOrder(dedicated) {
+function evidenceReturnOrder(dedicated) {
   const text = dedicated
     ? `This reply = one submit_draft call (plus ${dedicated.label} if you dig again). Two paths are open — pick one to decide your next move:
 Path 1 — use ${dedicated.label} again to dig further into the evidence; once the new results return, use the submit_draft tool to directly output your thinking and output, putting everything to execute in its actions/files/edits fields.
@@ -543,21 +533,34 @@ const evidenceResultMessage = (soul, stamp, r) => Object.freeze({
 })
 
 /**
- * C1 步内带 raw（2026-08-25）：每段收流回灌该魂私有上下文时，思考非空就在 tool-result 之后
- * 附一条 user 消息把它自己本步的思考原文带回去。
- * 根因：assistantBlocksOf 只回灌 text + 真工具调用，reasoning 块被剥（块签名与外部上下文不匹配），
- * 于是「填表的那一发」看不见自己刚才想了什么——真机 staged 常态 379/385，填表者恒断片，
- * findings/plan 只能从已发的动作反推。
- * 纪律：只进同流私有上下文（extraMessages / mendMsgs），阅后即焚，绝不进会话历史（前缀缓存铁律）；
- * 表决不带；off 档没有思考 → 不附（off 档零变化红线）；放行进历史时 raw 照旧剥。
- * 代价：每次喂回/补枪多付一份 raw 的输入 token。
+ * 内层取证/补枪的私有上下文回灌（2026-08-29 换芯，病例 session-395ba755；前身 C1 rawCarry 退役）：
+ * 上一发**原样带回**——思考块不再剥，finish 块上的 replayState 一并挂上（source.kind='model'，
+ * provider/model 取 replayState.response 保证三方一致）；同魂同路由下 pi-ai 走 replayedAssistant
+ * 原生回放（thinking + 签名），模型像正常 agent 一样续写自己步内的思考。
+ * 块数与 replayState.blocks 对不齐（上游剥过块，如 mend 传入的 fin）或 replayState 缺席 →
+ * 不挂 replayState 走 plugin source：pi-ai foreignAssistant 把 reasoning 转无签名 thinking，
+ * 思考仍在场、请求不炸（dsh resume 旧会话同款降级路）。
+ * 旧机制（剥思考 + rawCarry 文字小抄逐轮累积、且排在工具结果之后）正是四连重复的病灶：
+ * 首轮 11 万字旧念头永生在上下文末尾，模型每轮从小抄续写，把「计划」当「还没干的活」重复执行。
+ * 纪律不变：只进同流私有上下文（extraMessages / mendMsgs），阅后即焚；表决不带；放行进历史时照旧剥。
  */
-const rawCarryMessage = (soul, stamp, raw) => Object.freeze({
-  id: `trisoul-raw-${soul.name}-${stamp}`,
-  role: 'user',
-  content: Object.freeze([Object.freeze({ type: 'text', text: `Your own raw thinking so far this step, for you to pick up from:\n\n${raw}` })]),
-  source: Object.freeze({ kind: 'plugin', plugin: 'trisoul-consensus' }),
-})
+const nativeAssistantOf = (d, opts, id) => {
+  // submit_draft 交稿块不带回（悬空调用：没有对应 tool-result，回灌即孤悬）；滤块后 replayState
+  // 块数自然对不齐 → 自动走降级路。取证喂回的稿全是专属调用（allInner 判定），不触发此滤。
+  const blocks = (d.chunks ?? [])
+    .filter(c => c.type === 'block-end' && c.block && (c.block.type === 'text' || c.block.type === 'reasoning' || (c.block.type === 'tool-call' && c.block.name !== SUBMIT_TOOL)))
+    .map(c => Object.freeze(c.block.type === 'tool-call'
+      ? { type: 'tool-call', id: c.block.id, name: c.block.name, arguments: c.block.arguments ?? '{}' }
+      : { type: c.block.type, text: c.block.text ?? '' }))
+  const replayState = (d.chunks ?? []).find(c => c.type === 'finish')?.replayState
+  const usable = replayState && (!Array.isArray(replayState.blocks) || replayState.blocks.length === blocks.length)
+  return Object.freeze({
+    id, role: 'assistant', content: Object.freeze(blocks),
+    source: Object.freeze(usable
+      ? { kind: 'model', provider: replayState.response?.provider ?? opts?.provider, model: replayState.response?.model ?? opts?.model, replayState }
+      : { kind: 'plugin', plugin: 'trisoul-consensus' }),
+  })
+}
 
 /** ③ 兜底实答代填（B6，2026-08-25 换芯；2026-08-23 补枪三连废除——兜底 1 发后仍缺封皮不再重试、不再失联）：
  *  findings=模型实答（补枪回复的正文/思考，都空则退原稿的；全空走如实自述的兜底句），
@@ -588,8 +591,8 @@ export function releaseText(output, action) {
   return ZERO_OUTPUT_NOTICE
 }
 
-/** 独走步挂账：sessionId → { winnerSoul, tips:[{claim,thinking,output}] }——表决后败魂 claim 触发，下一次同会话请求消费 */
-const pendingTips = new Map()
+/** 独走步挂账（2026-08-28 起随 apply 实例，不再模块级——两个实例/两轮测试互不串味）：
+ *  sessionId → { winnerSoul, tips:[{voter,kind,divergence,thinking,output}], framing }——表决后有分叉/平票送稿触发，下一次同会话请求消费 */
 
 export function apply(ctx, config = {}) {
   const souls = validateSouls(config.souls ?? [])
@@ -598,10 +601,39 @@ export function apply(ctx, config = {}) {
     return
   }
   let turn = 0
+  const pendingTips = new Map()
   /** 缺陷3（2026-08-24）旁白节流台账：sessionId → { officerLine }。在册 = 本会话已报过全量配置口径，之后只发短版；
    *  officerLine 记上次报过的专属工具配置，只有真变了才重报 [官位]（真机一场会话曾把这两行原样重复 22 遍）。
    *  与 turn 同为 apply 级状态：一个进程一个插件实例，行为等价于全局，但不跨实例串味。 */
   const notes = new Map()
+  /** 协议探明缓存（进程级）：provider → api。pi-ai 在 onPayload 里递来 model.api，探一次全会话受益 */
+  const apiSeen = new Map()
+  /** 该魂的渠道协议（按序：静态 api → 探明缓存 → 内建适配器固定表 → 问 dsh-api）；都不知道 → undefined = 协议未知 */
+  const apiOf = (soul) => {
+    if (typeof soul.api === 'string' && soul.api) return soul.api
+    const p = soul.provider
+    if (typeof p !== 'string' || !p) return undefined
+    if (apiSeen.has(p)) return apiSeen.get(p)
+    if (ADAPTER_API[p]) return ADAPTER_API[p]
+    let v
+    try { v = ctx.bail('trisoul/provider-api', p) } catch { v = undefined }
+    return (typeof v === 'string' && v) ? v : undefined
+  }
+  apiOf.seen = apiSeen
+  // todolist 清单存储（随 apply 实例；会话持久靠快照事件，见 todolist.mjs）
+  // 08-30 P4：verify_link 的 test cmd 与 bash 工具守同一份安全门名单（dsh-guard 应答 trisoul/guard；缺席 = 不拦）
+  const todoStore = createTodoStore({ checkCmd: (cmd) => ctx.bail?.('trisoul/guard', { command: cmd }) })
+  registerTodoFaces(ctx, todoStore)
+  // I2 换代注入：pre-step 边界维护（与画布状态区同一安全点；失败绝不阻塞主循环）
+  try {
+    ctx.on('agent/pre-step', (payload, next) => {
+      try {
+        const session = payload?.agent?.session
+        if (session) todoStore.maintainInjection(session)
+      } catch (e) { ctx.logger?.warn(`trisoul-consensus: todo 清单注入失败（放行）${String(e?.message ?? e)}`) }
+      return next()
+    }, { global: true })
+  } catch (e) { ctx.logger?.warn(`trisoul-consensus: agent/pre-step 钩子不可用，todo 清单注入停摆 ${String(e?.message ?? e)}`) }
   ctx.on('llm/stream', (options, next) => {
     if (options.purpose || PASSTHROUGH.has(options)) return next()
     turn += 1
@@ -609,8 +641,37 @@ export function apply(ctx, config = {}) {
     // 取走即消费——独走失败时 tips 已丢弃，同流内回退正常共识步
     const pending = options.sessionId != null ? pendingTips.get(options.sessionId) : undefined
     if (pending) pendingTips.delete(options.sessionId)
-    return consensusStream(ctx, options, souls, config, turn, pending, notes)
+    return consensusStream(ctx, options, souls, config, turn, pending, notes, pendingTips, todoStore, apiOf)
   })
+}
+
+/**
+ * todo 工具组的宿主面注册（两件都可缺席降级——测试假 ctx / 无头精简 ctx 不齐全）：
+ * ① todo 工具进 ctx.tools（三魂经 actions 栏调用、宿主放行后执行；顶替原装 todo_write——原装须在 profile
+ *    patch 里 disabled，见 cordis.patch.yml 的 tool-todo 条）；
+ * ② M12 UI 投影兼容：注册与原装同 key（todos）同 wire 形（content/status）的会话投影，从清单快照事件派生，
+ *    title→content、done→completed|pending（两态，不加 in_progress——用户拍板）；不随 turn/start 清空（持久显示）。
+ *    原装未 disable 时同 key 注册会被登记处拒绝——warn 不炸（工具照用，只是 UI 清单不接管）。
+ */
+function registerTodoFaces(ctx, todoStore) {
+  try { ctx.tools?.register?.(todoToolDefinition(todoStore)) } catch (e) {
+    ctx.logger?.warn(`trisoul-consensus: todo 工具注册失败 ${String(e?.message ?? e)}`)
+  }
+  const passthrough = { parse: (v) => v }
+  try {
+    ctx.inject?.(['sessionProjections'], (pctx) => {
+      try {
+        pctx.sessionProjections.register({
+          key: 'todos',
+          stateSchema: passthrough,
+          init: () => null,
+          apply: (state, event) => isTodoSnapshot(event) ? todosOf(event.data.tasks) : state,
+          wire: { viewSchema: passthrough, view: (state) => state },
+          stateVersion: 3,
+        })
+      } catch (e) { ctx.logger?.warn(`trisoul-consensus: todos 投影注册失败（原装 tool-todo 未禁用？）${String(e?.message ?? e)}`) }
+    })
+  } catch (e) { ctx.logger?.warn(`trisoul-consensus: sessionProjections 注入不可用 ${String(e?.message ?? e)}`) }
 }
 
 /** 配置错误要响亮：灵魂条目缺 provider/model 直接拒载，而不是运行时神秘失联。 */
@@ -622,7 +683,7 @@ function validateSouls(souls) {
     if (typeof s.model !== 'string' || !s.model) throw new Error(`trisoul-consensus: souls[${i}].model 缺失`)
     return { ...s, name: String(s.name ?? String.fromCharCode(65 + i)) }
   }).map((s, i, all) => {
-    // name 是稿件归属/计票/tips 挂账的唯一键，重名会把票和 salvage 静默挂到别的魂上——响亮拒载（B9）
+    // name 是稿件归属/计票/tips 挂账的唯一键，重名会把票和分叉静默挂到别的魂上——响亮拒载（B9）
     if (all.findIndex(x => x.name === s.name) !== i) throw new Error(`trisoul-consensus: souls 灵魂名重复：${s.name}`)
     return s
   })
@@ -957,13 +1018,15 @@ function mkMsg(tag, text) {
 
 /**
  * 每轮快照一次灵魂列表（轮内一致）：@trisoul/dsh-api 的动态列表优先——
- * `ctx.bail('trisoul/souls', sessionId?)` 返回 `[{name,title?,persona?,provider,model,temperature?,reasoningEffort?,enabled:true}]`
- * （已解析、已过目录校验、name 唯一无 '/'、只含 enabled；长度可与静态不同，用户可增删灵魂）。
- * sessionId 让 dsh-api 按会话级预设绑定换启用集（composer 编队 chip：随时可切，下一轮生效）。
+ * `ctx.bail('trisoul/souls', sessionId?)` 返回 `[{name,title,persona,officer,provider,model,temperature,followMain?,enabled:true}]`
+ * （已解析、name 唯一无 '/'、只含启用魂；长度 = 用户选的 soulCount 1~3）。
+ * sessionId 参数保留（历史上会话级绑定用），dsh-api 现已忽略。
  * undefined / 可用条目 0 时退回 cordis 静态 souls（静态路径保留逐魂 trisoul/ai-config 覆盖）；
  * 1 条 = 单魂模式（2026-08-27 放开）：无表决直放，见 alive.length===1 的配置态分支。
  */
-function resolveSouls(ctx, staticSouls, options) {
+function resolveSouls(ctx, staticSouls, options, apiOf = () => undefined) {
+  // 每步钉死协议（soul.api）：轮内 jsonDoorFor / [格式锁] 旁白 / 兜底一枪看同一个值；探明缓存只对下一步生效
+  const pin = (list) => list.map(s => ({ ...s, api: apiOf(s) }))
   let live
   try { live = ctx.bail('trisoul/souls', options.sessionId) } catch { live = undefined }
   if (Array.isArray(live)) {
@@ -972,16 +1035,18 @@ function resolveSouls(ctx, staticSouls, options) {
         && typeof s.provider === 'string' && s.provider
         && typeof s.model === 'string' && s.model)
       .map((s, i) => ({ ...s, name: String(s.name ?? String.fromCharCode(65 + i)) }))
-      // 统一模式（followMain）：跟随对话框选的模型——主请求带 provider/model 就用它（用户改对话框模型即刻生效）
-      .map(s => (s.followMain && options.provider && options.model) ? { ...s, provider: options.provider, model: options.model } : s)
+      // 统一模式（followMain）：跟随对话框选的模型——主请求带 provider/model 就用它（用户改对话框模型即刻生效）；
+      // 渠道换了，条目自带的 api（如有）不再可信，按新渠道重新判
+      .map(s => (s.followMain && options.provider && options.model)
+        ? { ...s, provider: options.provider, model: options.model, ...(s.provider !== options.provider ? { api: undefined } : {}) } : s)
     if (ok.length >= 1) {
       // 坏条目（缺 provider/model）滤除后余下的照用——dsh-api 下发前本就校验过路由，走到这里属异常，warn 保可观测
       if (ok.length < live.length) ctx.logger?.warn(`trisoul-consensus: trisoul/souls ${live.length - ok.length} 条不可用已滤除，实际启用 ${ok.map(s => s.name).join(',')}`)
-      return ok
+      return pin(ok)
     }
     if (live.length > 0) ctx.logger?.warn(`trisoul-consensus: trisoul/souls 可用条目 0 个，退回静态配置`)
   }
-  return staticSouls.map(s => liveSoul(ctx, s))
+  return pin(staticSouls.map(s => liveSoul(ctx, s)))
 }
 
 /**
@@ -997,6 +1062,8 @@ function liveSoul(ctx, soul) {
     provider: live.provider || soul.provider,
     model: live.model || soul.model,
     temperature: typeof live.temperature === 'number' ? live.temperature : soul.temperature,
+    // 路由换了渠道 → 静态 api（协议）不再可信，交给探明 / dsh-api 重新判
+    ...(live.provider && live.provider !== soul.provider ? { api: undefined } : {}),
   }
 }
 
@@ -1077,8 +1144,6 @@ function liveConsensusConfig(ctx, config) {
     innerRounds: pick('innerRounds', nonNegInt) ?? DEFAULT_INNER_ROUNDS,
     // T4（工单 v6）UI 心跳周期：表决/补枪/收官期间每隔这么久发一次 phase:'status'；0 = 关
     statusHeartbeatMs: pick('statusHeartbeatMs', nonNegInt) ?? DEFAULT_STATUS_HEARTBEAT_MS,
-    // T2（工单 v6）走 JSON 强制输出的渠道白名单；空数组 = 全渠道回软路线（一键回退出口）
-    jsonSchemaProviders: pick('jsonSchemaProviders', v => Array.isArray(v) && v.every(x => typeof x === 'string')) ?? DEFAULT_JSON_SCHEMA_PROVIDERS,
     // 面板豁免宿主工具名单（进内层白名单/evidence 菜单的宿主工具）。默认空 = trisoul_recall 暂时撤出
     // 取证面（2026-08-25 用户令，病例 9bd772f3：recall 变参内环空转）；恢复 = 配置层传 ['trisoul_recall']。
     exemptHostTools: pick('exemptHostTools', v => Array.isArray(v) && v.every(x => typeof x === 'string')) ?? [],
@@ -1110,25 +1175,20 @@ export function contextFrameOf(opts) {
 const soulTitle = (soul) => soul.title ? `灵魂 ${soul.name} · ${soul.title}` : `灵魂 ${soul.name}`
 const cnNum = (n) => ['零', '一', '两', '三', '四', '五', '六', '七', '八', '九'][n] ?? String(n)
 
-/** 提取表决 JSON 里的 reason 全文（转义原样保留，不截断；旁白展示时另行 clip） */
-function parseReason(text) {
-  const m = /"reason"\s*:\s*"((?:[^"\\]|\\.)*)"?/.exec(text ?? '')
-  return m ? m[1] : undefined
-}
-/** 提取文本票里的 salvage 声明（D1）；没写 = 空串 */
-function parseSalvage(text) {
-  const m = /"salvage"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(text ?? '')
+/** 提取文本票 / 补比文本里的 divergence（转义原样保留，去首尾空白）；没写 = 空串 */
+function parseDivergence(text) {
+  const m = /"divergence"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(text ?? '')
   return m ? m[1].trim() : ''
 }
 
 /**
- * 解析一张文本选票 → { picks, labels, reason, parsed, reject? }。
+ * 解析一张文本选票 → { picks, labels, divergence, reason, parsed, reject? }。
  * picks = [真实候选下标] 或 []（弃权 / 无效编号 / 两魂互审时的「不放行」）；候选编号 k 映射回 perm[k-1]。
  * 认 "pick": k；旧式 "picks": [k,…]（取第一个）与 "best" 兼容；没写 JSON 但散文投票也认；完全不可解析 = 未解析（弃权、触发重试）。
+ * reason 自 2026-08-28 起只承载系统弃权说明（「（弃权：…）」），模型不再写票理由——票的文字面全归 divergence。
  */
 export function parseBallot(text, { m, perm }) {
   const t = text ?? ''
-  const reason = parseReason(t)
   let tok
   const one = /"pick"\s*:\s*"?\s*(候选\s*|candidate\s*#?\s*)?(-?\d+)\s*"?/i.exec(t)
   if (one) tok = one[2]
@@ -1151,9 +1211,9 @@ export function parseBallot(text, { m, perm }) {
       }
     }
   }
-  if (tok === undefined || tok === null) return { picks: [], labels: [], reason: reason ?? '（弃权：输出被截断或不含 JSON）', salvage: '', parsed: false }
+  if (tok === undefined || tok === null) return { picks: [], labels: [], reason: '（弃权：输出被截断或不含 JSON）', divergence: '', parsed: false }
   const r = resolvePick(tok, { m, perm })
-  return { ...r, reason: reason ?? (r.picks.length || r.reject ? '' : '（弃权：选票无有效选项）'), salvage: parseSalvage(t), parsed: true }
+  return { ...r, reason: (r.picks.length || r.reject ? '' : '（弃权：选票无有效选项）'), divergence: parseDivergence(t), parsed: true }
 }
 
 /** 一个选项 token → picks（候选编号映射回真实下标 perm[k-1]）；两魂互审时 0 = 不放行（reject）；无效编号 = 空 */
@@ -1175,21 +1235,29 @@ function resolvePick(tok, { m, perm }) {
 export function parseBallotArgs(raw, { m, perm }) {
   let o = raw
   if (typeof raw === 'string') { try { o = JSON.parse(raw) } catch { o = undefined } }
-  const bad = (why) => ({ picks: [], labels: [], reason: `（弃权：${why}）`, salvage: '', parsed: false })
+  const bad = (why) => ({ picks: [], labels: [], reason: `（弃权：${why}）`, divergence: '', parsed: false })
   if (!o || typeof o !== 'object' || Array.isArray(o)) return bad('选票工具参数不是 JSON 对象')
   const tok = o.pick !== undefined && o.pick !== null ? o.pick
     : Array.isArray(o.picks) ? o.picks.find(t => t !== null && t !== undefined)
       : (o.best !== undefined && o.best !== null ? o.best : undefined)
   if (tok === undefined) return bad('选票工具参数没有 pick')
-  const reason = typeof o.reason === 'string' ? o.reason : ''
   const r = resolvePick(tok, { m, perm })
-  return { ...r, reason: reason || (r.picks.length || r.reject ? '' : '（弃权：选票无有效选项）'), salvage: typeof o.salvage === 'string' ? o.salvage.trim() : '', parsed: true }
+  return { ...r, reason: (r.picks.length || r.reject ? '' : '（弃权：选票无有效选项）'), divergence: typeof o.divergence === 'string' ? o.divergence.trim() : '', parsed: true }
 }
 
+/** divergence 非空 = 知情票（投票者真比过、写下了实质分叉） */
+const hasFork = (v) => typeof v?.divergence === 'string' && v.divergence.trim() !== ''
+
 /**
- * 计票：counts[i] = 候选 i 的票数（每魂 1 票、只投别人）。
- * v2 无融合轮：decision ∈ { 'winner', 'abstain' }——平票（≥3 魂 1-1-1 环投；2 魂互不放行 = 全 0）
- * 与全员弃权一律按「对话轮次 + 表决轮」错位轮换选 chosenIdx 直接放行，无专门机制。
+ * 计票：counts[i] = 候选 i 的票数（每魂 1 票、只投别人；votes[i] 恒为 alive[i] 那魂的票）。
+ * v2 无融合轮：decision ∈ { 'winner', 'abstain' }。
+ * 平票破平阶梯（2026-08-28 表决重设计，替换「一律按轮次取模」）——tieKind 标注走了哪条：
+ *   null          明胜（唯一最高票），tie=false
+ *   'homogeneous' 全员有效实投且无人写分叉 → 同质，轮换；不送 tips
+ *   'resolved'    满编 1-1-1 里恰有一张「利益无关的知情票」（作者自己的稿未被任何知情票提名）→ 它投谁谁胜（chosenIdx 改判）
+ *   'deadlock'    满编 1-1-1 三张知情票互相提名、无中立裁判 → 轮换 + 补比 + 全量送稿
+ *   'degraded'    故障态（有弃权 / 不满编 / 互不放行 / 全员弃权）→ 轮换 + 全量送稿，不搞智能裁决
+ * 轮换只由对话轮次错位（多表决轮的 round 参数随融合轮拆除，2026-08-26 B8）。
  */
 export function tallyVotes(votes, n, turn) {
   const counts = Array.from({ length: n }, () => 0)
@@ -1197,10 +1265,25 @@ export function tallyVotes(votes, n, turn) {
   const voted = votes.filter(v => v.parsed).length
   const max = Math.max(...counts)
   const tied = counts.flatMap((c, i) => c === max ? [i] : [])
-  // v2 单轮表决：轮换只由对话轮次错位（多表决轮的 round 参数随融合轮拆除，2026-08-26 B8）
-  const chosenIdx = tied[(turn - 1) % tied.length]
+  const tie = tied.length > 1
+  let chosenIdx = tied[(turn - 1) % tied.length]
   const decision = voted === 0 ? 'abstain' : 'winner'
-  return { counts, max, tied, tie: tied.length > 1, chosenIdx, decision, voted }
+  let tieKind = null
+  let resolvedBy = null
+  if (tie) {
+    const realPick = (v) => v.parsed && v.picks.length === 1
+    const allPicked = votes.length === n && votes.every(realPick)
+    if (allPicked && !votes.some(hasFork)) tieKind = 'homogeneous'
+    else if (!(allPicked && n >= 3 && tied.length === n)) tieKind = 'degraded'
+    else {
+      const informed = votes.map((v, i) => ({ v, i })).filter(({ v }) => hasFork(v))
+      const nominated = new Set(informed.map(({ v }) => v.picks[0]))
+      const disinterested = informed.filter(({ i }) => !nominated.has(i))
+      if (disinterested.length === 1) { chosenIdx = disinterested[0].v.picks[0]; resolvedBy = disinterested[0].i; tieKind = 'resolved' }
+      else tieKind = 'deadlock'
+    }
+  }
+  return { counts, max, tied, tie, chosenIdx, decision, voted, tieKind, resolvedBy }
 }
 
 /**
@@ -1321,7 +1404,7 @@ function normalizeSubmit(o) {
  * 合成块塞回稿 chunks 后，指纹/免表决/收官/独走/候选卡/监控/放行重放照旧从 chunks 数调用——
  * 六处「取材源失明」一举归零（家族病防复发：上次 submit 化正文空对空恒 1 同款教训）。
  */
-export function bridgeCallsOf(sub, stamp = 0) {
+function bridgeCallsOf(sub, stamp = 0) {
   if (!sub) return []
   const calls = []
   for (const f of sub.files ?? []) calls.push({ name: 'write', arguments: { file_path: f.path, content: f.content } })
@@ -1329,11 +1412,7 @@ export function bridgeCallsOf(sub, stamp = 0) {
   for (const a of sub.actions ?? []) calls.push({ name: a.name, arguments: a.arguments })
   return calls.map((c, i) => ({ id: `trisoul-bridge-${stamp}-${i}`, name: c.name, arguments: JSON.stringify(c.arguments) }))
 }
-/** 稿子的可回放块（文本 + 真工具调用；思考块不进私有上下文——签名与外部上下文不匹配，且取证轮不需要。
- *  submit_draft 同样不进：交稿调用没有对应的工具结果，回灌会给私有上下文留一个悬空调用） */
-const assistantBlocksOf = (chunks) => chunks
-  .filter(c => c.type === 'block-end' && c.block && (c.block.type === 'text' || (c.block.type === 'tool-call' && c.block.name !== SUBMIT_TOOL)))
-  .map(c => c.block.type === 'text' ? { type: 'text', text: c.block.text ?? '' } : { type: 'tool-call', id: c.block.id, name: c.block.name, arguments: c.block.arguments ?? '{}' })
+// （2026-08-29：旧 assistantBlocksOf（剥思考回灌）已由 nativeAssistantOf 原样带回取代，函数退役。）
 const toolResultText = (blocks) => (Array.isArray(blocks) ? blocks : [])
   .map(b => b?.type === 'text' ? (b.text ?? '') : b?.type === 'tool-result' ? toolResultText(b.content) : '').join('')
 const argsSummary = (raw) => String(raw ?? '').replace(/\s+/g, ' ').trim()
@@ -1453,7 +1532,7 @@ function lastUserSeq(session) {
   return null
 }
 
-async function* consensusStream(ctx, options, staticSouls, config, turn, pending = null, notes = new Map()) {
+async function* consensusStream(ctx, options, staticSouls, config, turn, pending = null, notes = new Map(), pendingTips = new Map(), todoStore = createTodoStore(), apiOf = () => undefined) {
   const startedAt = Date.now()
   let done = false
   const report = (info) => {
@@ -1462,15 +1541,15 @@ async function* consensusStream(ctx, options, staticSouls, config, turn, pending
     catch (e) { ctx.logger?.warn(`trisoul-consensus: 监控事件上报失败 ${String(e?.message ?? e)}`) }
   }
   try {
-    yield* consensusBody(ctx, options, staticSouls, config, report, startedAt, turn, pending, notes)
+    yield* consensusBody(ctx, options, staticSouls, config, report, startedAt, turn, pending, notes, pendingTips, todoStore, apiOf)
   } finally {
     if (!done) report({ phase: 'done', mode: 'aborted', result: 'aborted', durationMs: Date.now() - startedAt })
   }
 }
 
-async function* consensusBody(ctx, options, staticSouls, config, report, startedAt, turn, pending = null, notes = new Map()) {
+async function* consensusBody(ctx, options, staticSouls, config, report, startedAt, turn, pending = null, notes = new Map(), pendingTips = new Map(), todoStore = createTodoStore(), apiOf = () => undefined) {
   // 每轮开始时快照一次实时配置（模式切换/改模型/增删灵魂即刻对下一轮生效；轮内保持一致）
-  const souls = resolveSouls(ctx, staticSouls, options)
+  const souls = resolveSouls(ctx, staticSouls, options, apiOf)
   const cfg = liveConsensusConfig(ctx, config)
   const timeout = { timeoutMs: cfg.soulTimeoutMs, idleTimeoutMs: cfg.soulIdleTimeoutMs, reasoningFuseChars: cfg.reasoningFuseChars }
   // 小作业档位：'off' 模式下按该灵魂的路由做能力门控（声明了 off 档才传，否则 undefined = 提供商默认）
@@ -1603,28 +1682,29 @@ async function* consensusBody(ctx, options, staticSouls, config, report, started
   /** ①（2026-08-23）该魂的专属工具名单（内层白名单/教学块/指引同源）；无官位 = 空 */
   const dedicatedToolsFor = (soul) => {
     if (!soul.officer || !innerEnabled) return []
-    if (soul.officer === 'align') return [TASK_ORIGINAL_TOOL]
+    if (soul.officer === 'align') return [TASK_MAP_TOOL]
     if (soul.officer === 'erudite') return webAllowed
-    if (soul.officer === 'empiric') return [RUN_VERIFY_TOOL]
+    if (soul.officer === 'empiric') return [VERIFY_LINK_TOOL]
     return []
   }
   // 隐藏工具栏（工单 v5）——面板豁免宿主工具与动作工具清单：
   // trisoul_recall 原豁免直调（检查点头/记忆注入教「call trisoul_recall」；它本就是只读取证），
   // 2026-08-25 用户令暂时撤出取证面（病例 9bd772f3：recall 变参内环空转）——名单改走 cfg.exemptHostTools
   // （默认空）；撤出后 recall 回落 actions 栏（放行后外层执行），检查点头教的取回通道仍可兑现。
-  // write/edit 从 actions 清单剔除（大字符串埋深必崩，被 files/edits 顶层栏顶替）。
+  // write/edit 从 actions 清单剔除（大字符串埋深必崩，被 files/edits 顶层栏顶替）；
+  // todo_write 同剔（原装 todo 面已由本插件的 todo 工具顶位，M11——即便 profile 忘了 disable 也不给魂看见）。
   const HOST_EXEMPT_NAMES = cfg.exemptHostTools
   const hostTools = Array.isArray(options.tools) ? options.tools : []
   const exemptHost = hostTools.filter(t => HOST_EXEMPT_NAMES.includes(t?.name))
   const exemptNames = exemptHost.map(t => t.name)
-  const actionTools = hostTools.filter(t => t?.name && !HOST_EXEMPT_NAMES.includes(t.name) && t.name !== 'write' && t.name !== 'edit')
+  const actionTools = hostTools.filter(t => t?.name && !HOST_EXEMPT_NAMES.includes(t.name) && t.name !== 'write' && t.name !== 'edit' && t.name !== 'todo_write')
   /** 该魂的内层白名单（官位专属 + 面板豁免宿主工具）：白名单内=当场直调执行；其余真调用=违规剥丢 */
   const innerAllowFor = (soul) => new Set([...dedicatedToolsFor(soul), ...exemptNames])
   /** 该魂需要额外注入 schema 的私有工具（web 工具 schema 已在主请求 tools 里，不重复注） */
   const privateSchemasFor = (soul) => {
     if (!soul.officer || !innerEnabled) return []
-    if (soul.officer === 'align') return [taskOriginalSchema()]
-    if (soul.officer === 'empiric') return [runVerifySchema()]
+    if (soul.officer === 'align') return [taskMapSchema()]
+    if (soul.officer === 'empiric') return [verifyLinkSchema()]
     return []
   }
   /** B7（工单 v5 重写）工具分类教学（system 尾部，人设块后）：三分法——面板工具=当场私下出结果；
@@ -1638,15 +1718,15 @@ async function* consensusBody(ctx, options, staticSouls, config, report, started
       : ''
     return `\n\n## How your tools work\nYour tools fall into distinct classes — knowing which is which keeps a step clean:\n- Panel tools${panel.length ? ` (${panel.join(' / ')})` : ''}: executed immediately when called directly — your evidence channel for this very turn; call them when you need an answer now.${ded} Only the tools on this panel work this way — any other tool name issued directly (a read included) is discarded; route it through the execution fields.\n- Execution fields (actions / files / edits on submit_draft): real moves on the world. The system issues them after release, so their results arrive at your next step — record them and move on, never wait. A tool call issued directly is NOT executed — it is discarded; the fields are the only way to act.\n- submit_draft: the delivery channel — every reply includes it.`
   }
-  /** 官位专属工具介绍（system 尾部；2026-08-25 定稿 P8–P10）：只陈述功能+存在理由（blurb 融合），
-   *  何时用由模型自己决定——「让模型自己决定用什么不用什么，而不是写一堆提示词限制模型什么时候干什么」。 */
+  /** 官位专属工具介绍（system 尾部）：align/empiric 直引 spec 定稿 description（工具说明书只有一份原文，
+   *  system 与面板 schema 不分叉）；何时用由模型自己决定——「让模型自己决定用什么不用什么」。 */
   const officerHint = (soul) => {
     if (!soul.officer || !innerEnabled) return ''
-    if (soul.officer === 'align') return `\n\n## Dedicated tool\n${TASK_ORIGINAL_TOOL} returns the verbatim text of every user message in this session — a numbered complete list, newest last, untouched by compression. No parameters. It exists because of you: as you work you drift — wandering off on your own reading, shrinking the requirements without noticing — and after context compression all you hold is a paraphrase; this tool puts the actual words back in front of you, so you can study the user's intent from what they actually said and check your work against it.`
+    if (soul.officer === 'align') return `\n\n## Dedicated tool\n${TASK_MAP_TOOL} — ${taskMapSchema().description}`
     if (soul.officer === 'erudite') return webAllowed.length
       ? `\n\n## Dedicated tool\n${webAllowed.join(' / ')} search the web and fetch pages, turning "I don't know" into "it's in my context" — sourced facts beyond your own knowledge. They exist because of you: your knowledge has a boundary, and past it, facts written from memory are made up — without you noticing, because the wrong parts come out with the same fluency and the same certainty as the right ones.`
       : ''
-    if (soul.officer === 'empiric') return `\n\n## Dedicated tool\n${RUN_VERIFY_TOOL} tests code against reality with a real, read-only check — it never executes your code. kind is required, one of two: node-check runs node --check on a js/mjs/cjs file you just wrote to catch syntax errors (requires file, relative to the session working directory); tsc-noemit runs the project-local tsc --noEmit to catch type errors (cwd optionally points at a subproject). It exists because of you: your multi-step reasoning goes wrong without you noticing, and re-checking in your head uses the same head — one run tells you directly whether you're right, instead of re-reading with the same eyes that wrote it.`
+    if (soul.officer === 'empiric') return `\n\n## Dedicated tool\n${VERIFY_LINK_TOOL} — ${verifyLinkSchema().description}`
     return ''
   }
   /** ①分岔直令的按魂定制参数：专属工具名单 + 该官位的工具说明；无官位/降级 → undefined（退化为只有路径 2+格式块） */
@@ -1662,13 +1742,22 @@ async function* consensusBody(ctx, options, staticSouls, config, report, started
     const dedNames = dedicatedToolsFor(soul)
     return [...exemptHost, ...hostTools.filter(t => dedNames.includes(t?.name)), ...privateSchemasFor(soul)]
   }
-  /** T2：这一魂这一轮走不走 JSON 强制输出。逐魂判而不是逐轮判——精细模式下三魂可以落在不同渠道上。 */
-  const jsonModeFor = (soul) => usesJsonSchema(soul.provider, cfg.jsonSchemaProviders)
+  /** T2：这一魂这一轮走哪扇门（按 resolveSouls 钉死的 soul.api 协议）。逐魂判而不是逐轮判——精细模式下三魂可以落在不同渠道上。 */
+  const jsonDoorFor = (soul) => jsonDoorForApi(soul.api)
+  const jsonModeFor = (soul) => jsonDoorFor(soul) !== null
+  /** 探明协议：pi-ai 每次发请求前调 onPayload(params, model)，model.api 就是该渠道协议——记进进程级缓存，下一步起生效。
+   *  软路线也挂这只旁观钩子（请求体原样返回）——协议未知的渠道正是靠它上锁。 */
+  const observing = (soul, hook) => (params, model) => {
+    if (typeof model?.api === 'string' && model.api && soul.provider) apiOf.seen?.set(soul.provider, model.api)
+    return hook ? hook(params, model) : params
+  }
   /**
    * 盲写/独走/收官补一轮调用的完整 hint 与工具面（T2 起按渠道分岔）：
-   * - JSON 路（白名单渠道）：面板**必须清空**——2026-08-25 实测 tools 在场时 json_schema 锁即失效
+   * - JSON 路（有锁协议渠道：openai-responses / openai-completions）：面板**必须清空**——2026-08-25 实测 tools 在场时 json_schema 锁即失效
    *   （模型改发工具调用、JSON 缺失），所以「撤 tools」不是选择而是锁成立的前提；
    *   取证改走 evidence 字段，onPayload 给请求挂上 text.format 的语法锁。
+   * - json_object 门（2026-08-29，官方 chat /chat/completions）：同撤面板；锁换 response_format:{type:'json_object'}
+   *   （语法级真锁——散文/DSML 物理出不来；schema 不随 payload 走，整份说明书进 system 的 json 格式块）。
    * - 软路线（其余渠道）：工单 v5 单工具面板原样保留，一个字节不改。
    */
   /** JSON 路 system 尾的环境块：cwd/平台/日期三件事实。真机两度为 `find -printf` 白付一轮（魂靠撞墙才知在 macOS）——
@@ -1680,19 +1769,20 @@ async function* consensusBody(ctx, options, staticSouls, config, report, started
   }
   const soulDraftExtra = (soul) => {
     const panel = panelSchemasFor(soul)
-    if (jsonModeFor(soul)) {
-      // 最小核：system 只剩人设+环境块，每步注入为零（order null）——字段语义全住 schema description
-      return {
-        hint: envBlock(),
-        tools: [],
-        onPayload: jsonSchemaPayload(draftJsonSchema(actionTools, innerEnabled ? panel : [])),
-        order: null,
-      }
+    const door = jsonDoorFor(soul)
+    if (door) {
+      // 最小核：system 只剩人设+环境块，每步注入为零（order null）——schema 门字段语义全住 schema description；
+      // object 门 schema 进不了 payload，格式块（jsonFormatBlock）整块进 system
+      const schema = draftJsonSchema(actionTools, innerEnabled ? panel : [])
+      return door === 'schema'
+        ? { hint: envBlock(), tools: [], onPayload: observing(soul, jsonSchemaPayload(schema, soul.api)), order: null }
+        : { hint: jsonFormatBlock(schema) + envBlock(), tools: [], onPayload: observing(soul, jsonObjectPayload()), order: null }
     }
     return {
       hint: toolClassesHint(soul) + officerHint(soul) + draftDiscipline,
       tools: [...panel, submitDraftToolSchema(actionTools)],
       order: submitFirstOrder(dedicatedOrderFor(soul)),
+      onPayload: observing(soul, null),
     }
   }
   const sessionCwd = () => {
@@ -1708,14 +1798,16 @@ async function* consensusBody(ctx, options, staticSouls, config, report, started
       try { args = call.arguments ? JSON.parse(call.arguments) : {} } catch { throw new Error(`Tool arguments are not valid JSON: ${argsSummary(call.arguments)}`) }
       const agent = agentOf()
       if (!agent) throw new Error('No agent bound to this request; inner tools unavailable')
-      if (call.name === TASK_ORIGINAL_TOOL) {
-        // 对齐官私有工具：插件内直接从会话全量日志抽用户原文，不经外层工具注册表
-        text = taskOriginalText(agent.session)
-      } else if (call.name === RUN_VERIFY_TOOL) {
-        // 实证官私有工具：窄白名单只读检查（node --check / 本地 tsc --noEmit）
-        const r = await runVerify(args, sessionCwd(), signal)
+      if (call.name === TASK_MAP_TOOL) {
+        // 对齐官私有工具：todo list 结构操作，写操作落共享清单全局生效（M2）
+        const r = todoStore.execTaskMap(agent.session, args)
         text = r.text || '(no output)'
-        isError = !r.ok
+        isError = r.isError === true
+      } else if (call.name === VERIFY_LINK_TOOL) {
+        // 实证官私有工具：验证链接挂/跑/撤/看（op:run 真跑已挂测试文件）
+        const r = await todoStore.execVerifyLink(agent.session, args, sessionCwd(), signal)
+        text = r.text || '(no output)'
+        isError = r.isError === true
       } else {
         const r = await ctx.tools.execute({ callId: `inner-${soul.name}-${call.id ?? Date.now()}`, name: call.name, arguments: args, agent, signal: signal ?? new AbortController().signal })
         text = toolResultText(r?.content) || '(no output)'
@@ -1729,8 +1821,6 @@ async function* consensusBody(ctx, options, staticSouls, config, report, started
    * 直到它给出不含内层调用的最终稿。返回最终稿 + inner 轨迹。
    */
   // 落笔纪律（四格封皮版，2026-08-22）：内容只从 submit_draft 参数进来；拆格子让「要点全不全」变成表格结构。
-  //（原生思考仍留在 reasoning 通道，插件内部可见、不外传；网关无解码级强制——缺封皮由补枪兜出口，见 draftWithInner）
-  // 落笔纪律（三格 v2.1 英文版，2026-08-23）：内容只从 submit_draft 参数进来；新框架语直接英文写（⑨）。
   //（原生思考仍留在 reasoning 通道，插件内部可见、不外传；网关无解码级强制——缺封皮由补枪兜出口，见 draftWithInner）
   const draftDiscipline = `\n\n## Delivery discipline (hard requirement)\nEvery reply must include a call to submit_draft — your only delivery channel. Your distilled thinking and the user-facing prose come only from its parameters; words written in the plain-text body are not accepted:\n- findings: what you newly established this step — the concrete facts and observations that drove the decision; a path you ruled out and a suspicion you haven't verified count too; don't restate what's already established.\n- plan: your plan going forward — how you intend to proceed after this step, at whatever depth you've thought it through, key code included; what you don't record here is gone once this step ends. Leave it empty when you genuinely have none — never pad it.\n- action: the one concrete move you're making right now, matching the entries in the execution fields; one sentence.\n- output: the prose delivered to the user — respond in the user's language; only this field reaches the user. May be empty on a pure action step, but when there's something to say, say it plainly: what you did, what you saw, what you need next.\nfindings and action must be non-empty. Distillation compresses wording, not content — length tracks difficulty; never pad.\nReal actions (reading files, running commands, writing or modifying files) go in the actions/files/edits fields of submit_draft — never as directly issued tool calls: a direct call is NOT executed, it is discarded. Field entries execute after release, so their results do not come back within this turn — never hold back your submission waiting for results; you're recording what you decided to do and why, and that stands the moment the step is submitted. One submit_draft call carries it all: the envelope fields plus the execution fields. A reply without submit_draft is an unfinished step — nothing in it can be delivered until the submission arrives.`
   const draftWithInner = async (soul, stage, optsFor) => {
@@ -1762,14 +1852,9 @@ async function* consensusBody(ctx, options, staticSouls, config, report, started
       const stamp = Date.now()
       // 二期（工单 v5）：传入稿的违规直调块已在上游剥除，blocks 里不再有真调用——旧「悬空调用配占位结果」
       // 机制（(Action recorded as this step's proposal…) 假结果）随之退役，少一处对模型说假话。
-      const blocks = assistantBlocksOf(d.chunks)
-      const mendMsgs = []
-      if (blocks.length) {
-        mendMsgs.push(Object.freeze({ id: `trisoul-mend-a-${soul.name}-${stamp}`, role: 'assistant', content: Object.freeze(blocks), source: Object.freeze({ kind: 'plugin', plugin: 'trisoul-consensus' }) }))
-      }
-      // C1：带回本步至今的思考原文（assistantBlocksOf 剥掉了 reasoning，填表这一发本来是断片的）
-      const raw = String(d.reasoning ?? '').trim()
-      if (raw) mendMsgs.push(rawCarryMessage(soul, stamp, raw))
+      // 原样带回（含思考块）：传入的 fin 剥过块 → replayState 对不齐自动降级 foreign 路，思考仍在场
+      const mend0 = nativeAssistantOf(d, lastOpts, `trisoul-mend-a-${soul.name}-${stamp}`)
+      const mendMsgs = mend0.content.length ? [mend0] : []
       // ③ 兜底填表直令（B9 二期语境扩：封皮缺失或动作发错位置，动作重交进三栏；无封皮校验重试——1 发收啥算啥，缺了代填）
       mendMsgs.push(mkMsg(`mend-${soul.name}`, `Format error — your actions were issued in the wrong place or the envelope is missing. Use the submit_draft tool to resubmit: put everything to execute in its actions/files/edits fields (directly issued calls have been discarded), and fill the envelope fields.
 ${submitFormatBlock(SPAN_SO_FAR)}`))
@@ -1793,7 +1878,10 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
         jsonSub = parseJsonDraft(d.text)
         const want = jsonSub?.evidence
         // canonJson 键序规范化：evRepeat 是取证循环仅剩的刹车（innerRounds 默认不限），模型两次同参但键序不同不得绕过防抖
-        const evKey = want ? `${want.name} ${JSON.stringify(canonJson(want.arguments ?? {}))}` : ''
+        // 键带清单版本号（todolist）：task_map/verify_link 是有状态写工具，成功写入后重发同参是合法新请求
+        //（如改后重跑 op:run）；版本没动过的同参重发才是死循环（被拒调用原样重发同理——同一份拒绝答案已给过）
+        const ledgerRev = agentOf()?.session ? todoStore.revOf(agentOf().session) : 0
+        const evKey = want ? `${ledgerRev}:${want.name} ${JSON.stringify(canonJson(want.arguments ?? {}))}` : ''
         const evRepeat = !!want && seenEvidence.has(evKey)
         // 空调用（2026-08-25 用户令「空的应该也是不执行」）：required 参数空 = 与 null 同等对待
         const evEmpty = !!want && allow.has(want.name) && emptyRequiredArgs(panelByName.get(want.name), want.arguments)
@@ -1811,11 +1899,10 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
           ctx.logger?.info(`trisoul: 灵魂 ${soul.name} ${stage} 内层取证第 ${rounds} 轮（evidence 字段）：${r.name}(${r.args}) ${fmtK(r.chars)} 字${r.ok ? '' : ' ✗'}`)
           extraMessages = [
             ...extraMessages,
-            // 它自己上一轮的 JSON 原样回灌（保持这一轮的连贯）；结果只能走普通 user 消息——
+            // 它自己上一轮**原样回灌**（思考块在场，2026-08-29 换芯）；结果只能走普通 user 消息——
             // 这条路上没有 tool-call 可配对，发 tool-result 会留下孤儿 result 被提供方 400
-            Object.freeze({ id: `trisoul-inner-a-${soul.name}-${stamp}`, role: 'assistant', content: Object.freeze([Object.freeze({ type: 'text', text: String(d.text ?? '') })]), source: Object.freeze({ kind: 'plugin', plugin: 'trisoul-consensus' }) }),
+            nativeAssistantOf(d, lastOpts, `trisoul-inner-a-${soul.name}-${stamp}`),
             evidenceResultMessage(soul, stamp, r),
-            ...(String(d.reasoning ?? '').trim() ? [rawCarryMessage(soul, stamp, String(d.reasoning).trim())] : []),
             // 最小核：喂回不再挂直令——结果消息即事件本身,下一稿仍被 schema 强制,继续查还是交稿由模型自决
           ]
           continue
@@ -1847,8 +1934,35 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
       // 0=关出口）；设了正数就是轮数上限，超出后的专属调用回落混合稿防呆（照常执行、块剥除、缺封皮走补枪）。
       const roundsLeft = !(cfg.innerRounds > 0) || rounds < cfg.innerRounds
       const allInner = innerEnabled && roundsLeft && calls.length > 0 && calls.every(c => allow.has(c.name))
+      let fin = jsonFin ?? d
+      let classed = []
       if (allInner) {
-        const results = await Promise.all(calls.map(c => execInner(soul, c, lastOpts.signal)))
+        // 刹车与 JSON 路同一套账（08-30 P2：此前 seenEvidence/evRepeat/evEmpty 只装在 JSON 路，软路线裸奔——
+        // 幂等只读调用可无限取证轮，只剩 soulTimeoutMs 掐）：键带清单版本号，同参重复（版本未变）与必填参数为空不执行。
+        // 整稿全是重复/空调用 → 不执行、剥块、按交稿收口（封皮用这一稿自己的，缺则补枪→代填）；
+        // 有新鲜调用 → 只执行新鲜的，重复/空的回一条「未执行」结果配对（tool-call 必须有 tool-result，否则孤儿 400）。
+        const ledgerRev = agentOf()?.session ? todoStore.revOf(agentOf().session) : 0
+        classed = calls.map(c => {
+          let a; try { a = c.arguments ? JSON.parse(c.arguments) : {} } catch { a = c.arguments ?? '' }
+          const key = `${ledgerRev}:${c.name} ${JSON.stringify(canonJson(a ?? {}))}`
+          const skip = seenEvidence.has(key) ? 'repeat' : emptyRequiredArgs(panelByName.get(c.name), a) ? 'empty' : null
+          if (!skip) seenEvidence.add(key)
+          return { c, skip }
+        })
+        if (!classed.some(x => !x.skip)) {
+          const why = classed.every(x => x.skip === 'empty') ? '必填参数为空' : '已执行过的同参重复'
+          ctx.logger?.info(`trisoul: 灵魂 ${soul.name} ${stage} 取证请求全是${why}（${calls.map(c => c.name).join(', ')}）—— 未执行，按交稿收口`)
+          const dropIdx = new Set()
+          for (const c of d.chunks) if (c.type === 'block-end' && c.block?.type === 'tool-call' && allow.has(c.block.name)) dropIdx.add(c.index)
+          fin = { ...d, chunks: d.chunks.filter(c => !(typeof c.index === 'number' && dropIdx.has(c.index))) }
+          calls = []
+        }
+      }
+      if (allInner && calls.length > 0) {
+        const results = await Promise.all(classed.map(x => x.skip
+          ? { name: x.c.name, args: argsSummary(x.c.arguments), chars: 0, ok: false, durationMs: 0, isError: true, id: x.c.id,
+              text: x.skip === 'repeat' ? 'Not executed: duplicate of a lookup already run in this step (same arguments) — see its earlier result.' : 'Not executed: required arguments are empty.' }
+          : execInner(soul, x.c, lastOpts.signal)))
         rounds++
         // 思考链外传：一发多调用时挂该轮第一条（同发同思考，逐条重复只会白涨事件体积）
         results.forEach((r, i) => trail.push(i === 0 ? { ...r, reasoning: String(d.reasoning ?? '') } : r))
@@ -1857,18 +1971,16 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
         const stamp = Date.now()
         extraMessages = [
           ...extraMessages,
-          Object.freeze({ id: `trisoul-inner-a-${soul.name}-${stamp}`, role: 'assistant', content: Object.freeze(assistantBlocksOf(d.chunks)), source: Object.freeze({ kind: 'plugin', plugin: 'trisoul-consensus' }) }),
+          // 上一发原样带回（思考块 + replayState 在场，2026-08-29 换芯：原生回放代替 rawCarry 小抄）
+          nativeAssistantOf(d, lastOpts, `trisoul-inner-a-${soul.name}-${stamp}`),
           Object.freeze({ id: `trisoul-inner-r-${soul.name}-${stamp}`, role: 'user', source: Object.freeze({ kind: 'plugin', plugin: 'trisoul-consensus' }),
             content: Object.freeze(results.map(r => Object.freeze({ type: 'tool-result', toolCallId: r.id, isError: r.isError, content: Object.freeze([Object.freeze({ type: 'text', text: r.text })]) }))) }),
-          // C1：思考非空则带回本轮思考原文（off 档无思考不附）
-          ...(String(d.reasoning ?? '').trim() ? [rawCarryMessage(soul, stamp, String(d.reasoning).trim())] : []),
           evidenceReturnOrder(dedicatedOrderFor(soul)),   // ② 取证喂回末尾恒挂二选一直令（继续挖 / 交稿+动作）
         ]
         continue
       }
       // ③ 混合稿防呆（2026-08-23）：专属工具与真动作/交稿同稿——专属调用照常当场执行（结果进私有上下文，
       // 补枪封皮能参考），调用块随稿剥除（外层不认识私有工具，漏出去 = 坏步）；真动作照旧随稿放行。
-      let fin = jsonFin ?? d
       const mixedCalls = innerEnabled ? calls.filter(c => allow.has(c.name)) : []
       if (mixedCalls.length > 0) {
         const results = await Promise.all(mixedCalls.map(c => execInner(soul, c, lastOpts.signal)))
@@ -1898,13 +2010,16 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
         report({ phase: 'violation', stage, soul: soul.name, calls: violated })
         ctx.logger?.info(`trisoul: 灵魂 ${soul.name} ${stage} 直调违规（${violated.join(', ')}）——调用已剥除丢弃，动作以 submit 三栏为准`)
       }
-      // 最终稿（不含内层调用与违规直调）：四格+三栏直取工具参数；缺封皮 → 补枪（截断稿同样补——封皮是新请求，不吃已耗尽的上限）
+      // 最终稿（不含内层调用与违规直调）：四格+三栏直取工具参数；缺封皮 → 补枪（截断稿不补——① 它不参选，补枪白烧一发；封皮由实答代填占位）
       let sub = json ? jsonSub : submitArgsOf(fin)
       // JSON 路最小核：非空校验退场（四格皆可空,凑数病的根在「必须写点什么」）——
       // 只有解析失败（语法锁没兜住：桥补丁不在位 / 被输出上限截断）才补枪；软路线照旧走 envelopeError
       const missing = json ? (!sub ? 'JSON 交稿解析失败：回复不是一个合法 JSON 对象' : undefined) : envelopeError(sub)
       let mend
-      if (missing) {
+      if (missing && fin.truncated) {
+        // 08-30 P8：截断稿一发补枪都不发（① 它不参选），也就不记补枪——mend 记录/事件只记真发过的；封皮实答代填占位
+        sub = autofillEnvelope(fin, null, violated)
+      } else if (missing) {
         // kind:'staged' = 没调交稿（二期常见于违规直调后收流——动作发错位置被剥，封皮缺失）；
         // kind:'blank' = 真坏稿（调了交稿但格有空）。两者都补 1 发，仍缺 → 实答代填（失联归零）。
         const kind = sub ? 'blank' : 'staged'
@@ -1993,20 +2108,11 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
   const narrateMended = function* (list, label) {
     for (const d of list) {
       if (d.error || !d.mend) continue
+      if (!d.mend.autofilled && d.mend.kind !== 'blank') continue   // 常态两段收稿不再旁白（2026-08-30 瘦身；真坏稿才说话）
       const again = d.mend.attempts > 1 ? `（第 ${d.mend.attempts} 次成功）` : ''
       yield* note(d.mend.autofilled
         ? `[代填] 灵魂 ${d.soul.name} ${label}兜底未交封皮 → 实答代填收稿\n`
-        : d.mend.kind === 'blank'
-          ? `[补枪] 灵魂 ${d.soul.name} ${label}${d.mend.reason} → 单工具补交封皮${again}\n`
-          : `[收稿] 灵魂 ${d.soul.name} ${label}动作先发，封皮单工具交回${again}\n`)
-    }
-  }
-  /** 取证轨迹：谁在盲写/重写期间私下查了什么（不含结果全文；结果只在该魂自己的私有上下文里） */
-  const narrateInner = function* (list, label) {
-    for (const d of list) {
-      if (!d.inner?.length) continue
-      const items = d.inner.map(t => `${t.name}(${argsSummary(t.args)})${t.chars ? ` ${fmtK(t.chars)} 字` : ''}${t.ok ? '' : ' ✗'}`).join('；')
-      yield* note(`[取证] 灵魂 ${d.soul.name} ${label}内层 ${d.inner.length} 次${items ? `：${items}` : ''}\n`)
+        : `[补枪] 灵魂 ${d.soul.name} ${label}${d.mend.reason} → 单工具补交封皮${again}\n`)
     }
   }
   /**
@@ -2082,6 +2188,84 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
     const kept = dropped.size ? d.chunks.filter(c => !dropped.has(c.index)) : d.chunks
     yield* replay(kept, { stripReplay: true, dropReasoning: true })
   }
+  /**
+   * M5 收官闸门 + C 独走（蓝图 docs/todolist-tools-spec.md）：零条目提交（无真工具调用 = 本步收官）放行前查
+   * todo list——全部任务 勾✓ 且 有合格验证链接 才放行；任一不满足 → I3 旁白 + 实证官单发独走（I4 = 请求尾
+   * user 直令，只列真挡路的任务），独走稿顶替原稿再判。循环无守卫（同状态重复触发 = 有意，用户裁定独走就是
+   * 激活主循环）：独走稿带动作 → 放行、主循环继续；仍零条目且仍不绿 → 再独走，直到全绿或 C 失联/缺席。
+   * 空清单真空放行（M6）；无会话/内层关闭 = 闸门不在场。
+   * 08-29(3) 加两道：I6 文字复核（全绿后对没问过的 text 链接再独走一次）、I7 放行旁白（分型计数，给用户看）。
+   */
+  const releaseGated = async function* (d, doneInfo) {
+    let bounces = 0, reviews = 0
+    for (;;) {
+      if (toolCallsOf(d.chunks).length > 0) break
+      const session = agentOf()?.session
+      if (!session || !innerEnabled) break
+      const g = todoStore.gateState(session)
+      const empiric = souls.find(s => s.officer === 'empiric')
+      if (!g.pass) {
+        if (!empiric) {
+          yield* note(`[todo list] 尚有任务未解决：未完成 ${g.undone} · 无合格验证 ${g.unqualified} —— 无实证官在编，无法独走，照常放行\n`)
+          break
+        }
+        bounces++
+        // I3 弹回旁白（会话可见）+ 监控事件；I4 只随独走请求注入（阅后即焚，不进会话历史）
+        yield* note(`[todo list] 尚有任务未解决：未完成 ${g.undone} · 无合格验证 ${g.unqualified} —— 转独走处理\n`)
+        report({ phase: 'gate', kind: 'unresolved', bounce: bounces, undone: g.undone, unqualified: g.unqualified, total: g.total, solo: empiric.name })
+        const [cd] = await gather([empiric], 'draft', 'todo 独走 ', s =>
+          soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: mkMsg(`todo-solo-${bounces}`, todoStore.unresolvedText(session)) }, cfg))
+        if (cd.error) {
+          yield* narrateDead([cd], 'todo 独走 ')
+          yield* note('[警告] todo 独走失联 → 放行原稿\n')
+          break
+        }
+        yield* narrateRetried([cd], 'todo 独走 ')
+        yield* narrateMended([cd], 'todo 独走 ')
+        yield* narrateDrafts([cd], 'todo 独走稿')
+        d = cd
+        doneInfo = { ...doneInfo, todoGate: bounces }
+        continue
+      }
+      // I6 文字复核（08-29(3) 用户拍板，session-630c5fa8 病例：I4 弹回后 C 十条 text 十一秒过闸）：闸门全绿仍不放——
+      // 只靠 text 过关且身上有没问过的 text 链接的任务 → 实证官再独走一次，引回它自己写的 reason 让它复核；
+      // 按链接记账（问过的不再问；unlink 重挂 / M9 清空重挂 = 新链接再问），独走失联不记账（下次收官再问）。
+      // 出口：复核稿带动作 → 放行主循环继续；仍零动作 → 下一圈闸门仍绿、待问 0 → 放行。
+      const pending = todoStore.textReviewPending(session)
+      if (!pending) break
+      if (!empiric) {
+        yield* note(`[todo list] 全部任务已挂证据，其中 ${pending} 条仅凭文字过关 —— 无实证官在编，无法复核，照常放行\n`)
+        break
+      }
+      reviews++
+      yield* note(`[todo list] 全部任务已挂证据，其中 ${pending} 条仅凭文字过关 —— 转独走复核\n`)
+      report({ phase: 'gate', kind: 'text-review', bounce: reviews, textOnly: pending, total: g.total, solo: empiric.name })
+      const reviewText = todoStore.textReviewText(session)
+      const [cd] = await gather([empiric], 'draft', 'todo 复核 ', s =>
+        soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: mkMsg(`todo-review-${reviews}`, reviewText) }, cfg))
+      if (cd.error) {
+        yield* narrateDead([cd], 'todo 复核 ')
+        yield* note('[警告] todo 复核失联 → 放行原稿\n')
+        break
+      }
+      todoStore.markTextReviewed(session)
+      yield* narrateRetried([cd], 'todo 复核 ')
+      yield* narrateMended([cd], 'todo 复核 ')
+      yield* narrateDrafts([cd], 'todo 复核稿')
+      d = cd
+      doneInfo = { ...doneInfo, todoReview: reviews }
+    }
+    // I7 放行可见（给用户看的旁白，模型看不到）：账本非空的收官放行时点明证据分型——
+    // 「测试型」= 有跑绿 test 的任务数，「文字型」= 只靠 text 过关的任务数（⚠ 仅文字型 > 0 时带）
+    if (toolCallsOf(d.chunks).length === 0) {
+      const session = agentOf()?.session
+      if (session && innerEnabled) {
+        const sm = todoStore.releaseSummary(session)
+        if (sm.total) yield* note(`[todo list] 放行：${sm.done}/${sm.total} 完成 · 测试型 ${sm.tested} · 文字型 ${sm.textOnly}${sm.textOnly ? ' ⚠' : ''}\n`)
+      }
+    }
+    yield* release(d, doneInfo)
+  }
 
   // 阶段 1：盲写（并发，互不可见；单魂失败/超时→降级继续）
   // start 必须在第一次 yield 之前发出：消费者可能拿到第一个 chunk 就停止，finally 里的 done 要有 start 配对
@@ -2099,49 +2283,64 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
       yield* note(`${NOTE_MARK} 独走步：胜者灵魂 ${pending.winnerSoul} 已不在当前列表 → 丢弃 tips，回退共识\n`)
       ctx.logger?.warn(`trisoul: 独走步胜者 ${pending.winnerSoul} 不在列表，丢弃 tips 回退共识`)
     } else {
-      yield* note(`${NOTE_MARK} 独走步 · 灵魂 ${winner.name} 单发（吸收上一步 ${pending.tips.length} 条 tips，无盲写无表决）\n`)
+      yield* note(`${NOTE_MARK} 独走步 · 灵魂 ${winner.name}\n`)
       const soloT0 = Date.now()
       const [d] = await gather([winner], 'draft', '独走 ', s =>
         // ② tips 走请求内末尾 user 直令（instruction 追加在 sanitize 后的消息尾）；system 与普通盲写一致=缓存命中
-        soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: tipsMessage(pending.tips) }, cfg))
+        soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: tipsMessage(pending.tips, { framing: pending.framing }) }, cfg))
       report({ phase: 'solo', winner: winner.name, tips: pending.tips.length, durationMs: Date.now() - soloT0, ...(d.error ? { error: d.error } : {}) })
       if (!d.error) {
         report({ phase: 'draft', round: 1, solo: true, alive: [winner.name], dead: [], drafts: [draftInfo(d)] })
         yield* narrateRetried([d], '独走 ')
         yield* narrateMended([d], '独走 ')
-        yield* narrateInner([d], '独走 ')
         yield* narrateDrafts([d], '独走稿')
-        yield* release(d, { mode: 'solo', result: 'solo', rounds: 0, tips: pending.tips.length })
+        yield* releaseGated(d, { mode: 'solo', result: 'solo', rounds: 0, tips: pending.tips.length })
         return
       }
       yield* narrateDead([d], '独走 ')
       yield* note('[警告] 独走步失联 → 丢弃 tips，回退正常共识\n')
     }
   }
-  // 缺陷3：固定配置口径只在会话首个共识步给全量，之后短版；拿不到 sessionId 就每步都当首步（宁重复勿漏报）
+  // 旁白瘦身（2026-08-30 用户令「目的是用户用起来舒服」「很多情况没必要展示」）：常态只剩三样——
+  // 开场一行（即时反馈：盲写要跑几分钟，没有它折叠里长时间空白像死机）+ 每魂稿块 + 一行表决结果。
+  // 参数串（超时/重试/熔断）、[官位] 配置、[盲写] 完成宣告全删——设置页与监控页各有其位。
   const seen = options.sessionId != null ? notes.get(options.sessionId) : undefined
-  yield* note(seen
-    ? `${NOTE_MARK} ${souls.length === 1 ? '单魂启动 · 盲写' : `共识启动 · ${souls.length} 魂盲写`}\n`
-    : `${NOTE_MARK} ${souls.length === 1 ? `单魂启动 · 灵魂 ${souls[0].name} 盲写` : `共识启动 · ${souls.length} 个灵魂并行盲写`}（无输出 ${fmtMs(cfg.soulIdleTimeoutMs)} 判失联 · 总上限 ${cfg.soulTimeoutMs > 0 ? fmtMs(cfg.soulTimeoutMs) : '不限'}${cfg.reasoningFuseChars > 0 ? ` · 思考超 ${cfg.reasoningFuseChars >= 10000 ? `${Math.round(cfg.reasoningFuseChars / 10000)} 万` : cfg.reasoningFuseChars} 字熔断` : ''} · 失败自动重试 ${cfg.soulRetries} 次${souls.length > 1 ? ' · 平票按轮次轮换定胜者' : ''}）\n`)
-  // H 官位专属工具旁白：谁带什么加菜；博识在主请求无联网工具时如实标降级（netjail 评测下这是硬要求，不是容错）。
-  // 缺陷3：配置没变就不重复报——空串也记，专属工具整体消失再回来同样算变化
-  const narrateOfficers = () => souls.filter(s => s.officer).map(s => {
-    const extra = s.officer === 'align' ? [TASK_ORIGINAL_TOOL] : s.officer === 'erudite' ? webAllowed : s.officer === 'empiric' ? [RUN_VERIFY_TOOL] : []
-    return `${s.name}(${s.officer})${extra.length ? `+${extra.join('/')}` : '——降级（主请求无联网工具，本会话无内层）'}`
-  }).join('，')
-  const officerLine = (innerEnabled && souls.some(s => s.officer)) ? narrateOfficers() : ''
-  if (officerLine && (!seen || seen.officerLine !== officerLine)) yield* note(`[官位] 专属工具：${officerLine}\n`)
-  if (options.sessionId != null) notes.set(options.sessionId, { officerLine })
-  const drafts = await gather(souls, 'draft', '盲写', s => soulOptions(options, s, 'draft', soulDraftExtra(s), cfg))
-  let alive = drafts.filter(d => !d.error)
+  yield* note(`${NOTE_MARK} ${souls.length === 1 ? `灵魂 ${souls[0].name} 执笔` : `${souls.length} 魂盲写中`}\n`)
+  // 官位旁白只剩「出问题」一种：博识官没拿到联网工具（netjail / 宿主未配）→ 查证受限；状态变了才重报
+  const officerLine = (innerEnabled && souls.some(s => s.officer === 'erudite') && webAllowed.length === 0)
+    ? '⚠ 博识官没拿到联网工具，本会话查证受限' : ''
+  if (officerLine && (!seen || seen.officerLine !== officerLine)) yield* note(`${officerLine}\n`)
+  // 格式旁白（2026-08-30 用户令「只有出问题时才弹吧，常态说什么」）：常态一个字不说——锁上了不说、
+  // 协议未知的首发预热（下一步自动上锁）也不说；只有协议已知且无锁可挂（软路线是长期态）才弹一句白话。
+  // 按渠道去重合并一句；口径变了才重报（与 [官位] 同款节流）。
+  const unlockable = [...new Set(souls.filter(s => s.api && jsonDoorForApi(s.api) === null).map(s => s.provider))]
+  const lockLine = unlockable.length ? `渠道 ${unlockable.join('、')} 不支持强制格式输出，改用工具提交` : ''
+  if (lockLine && (!seen || seen.lockLine !== lockLine)) yield* note(`${lockLine}\n`)
+  if (options.sessionId != null) notes.set(options.sessionId, { officerLine, lockLine })
+  // I1（todolist）：本会话出现新用户消息 → 这一轮随对齐官的盲写请求注入一条提醒（阅后即焚，不进会话历史）；
+  // 每条用户消息只提醒一次，独走/收官补一轮不带（那些步的语境不是「用户刚发话」）
+  const alignNudge = innerEnabled && agentOf()?.session && souls.some(s => s.officer === 'align')
+    ? todoStore.takeNudge(agentOf().session) : false
+  // I5 空清单提醒：状态区已换代而清单仍空 → 提醒 A 一次；与 I1 撞车让路（I1 更具体，指向刚到的新指令，本条留待后续步）
+  const emptyNudge = !alignNudge && innerEnabled && agentOf()?.session && souls.some(s => s.officer === 'align')
+    ? todoStore.takeEmptyNudge(agentOf().session) : false
+  const drafts = await gather(souls, 'draft', '盲写', s => soulOptions(options, s, 'draft', {
+    ...soulDraftExtra(s),
+    ...(alignNudge && s.officer === 'align' ? { instruction: mkMsg(`todo-nudge-${s.name}`, TODO_NUDGE) } : {}),
+    ...(emptyNudge && s.officer === 'align' ? { instruction: mkMsg(`todo-empty-nudge-${s.name}`, TODO_EMPTY_NUDGE) } : {}),
+  }, cfg))
+  // ① 截断稿不参选（08-30 用户拍板；0829 批 updo/effect-sse 病例：finish max-tokens 的半截稿胜出 → 回放半截动作 →
+  //   宿主见 max-tokens 收手、动作一个没执行、rc=1）。三稿全截断 → 落到既有「全灭」单路兜底。
+  let alive = drafts.filter(d => !d.error && !d.truncated)
   const dead = drafts.filter(d => d.error)
+  const cut = drafts.filter(d => !d.error && d.truncated)
   yield* narrateRetried(drafts, '盲写')
   yield* narrateMended(drafts, '盲写')
-  yield* narrateInner(drafts, '盲写')
   yield* narrateDead(dead, '')
+  for (const d of cut) yield* note(`[出局] 灵魂 ${d.soul.name} 输出被上限截断，稿不完整，不参选\n`)
   report({
     phase: 'draft', round: 1,
-    alive: alive.map(d => d.soul.name), dead: dead.map(d => d.soul.name),
+    alive: alive.map(d => d.soul.name), dead: dead.map(d => d.soul.name), cut: cut.map(d => d.soul.name),
     drafts: drafts.map(draftInfo),
   })
   // ⑫ 上下文框架（监控实时面板）：本步盲写主请求的消息结构投影 + 各魂 usage
@@ -2153,8 +2352,12 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
         inputTokens: d.usage.inputTokens ?? null, cacheReadTokens: d.usage.cacheReadTokens ?? null })) })
   }
   if (alive.length === 0) {
-    yield* note('[警告] 所有灵魂失联，降级为单路\n')
-    report({ phase: 'done', mode: 'fallback', result: 'all-dead', durationMs: Date.now() - startedAt })
+    // 08-30 P3：全截断 ≠ 失联——旁白与 done 结果分开记（监控 all-dead 指标不被截断场景污染）；两者都走同一条单路兜底
+    const allCut = cut.length > 0
+    yield* note(allCut
+      ? `[警告] ${dead.length ? '余稿' : `${cnNum(drafts.length)}稿`}全被输出上限截断，无完整稿可选，降级为单路\n`
+      : '[警告] 所有灵魂失联，降级为单路\n')
+    report({ phase: 'done', mode: 'fallback', result: allCut ? 'all-cut' : 'all-dead', durationMs: Date.now() - startedAt })
     yield* closeNote()
     // 兜底走主路由：messages 同样去污染；无 purpose 会重入本插件的瀑布监听，用 PASSTHROUGH 标记穿透
     const fallback = { ...options, messages: sanitizeMessages(options.messages, cfg) }
@@ -2165,15 +2368,14 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
   if (alive.length === 1) {
     // 配置态单魂（2026-08-27 放开）与「多魂死剩一个」分开记账：前者是正常形态（mode:'single'，不进降级指标），后者才是降级
     if (souls.length === 1) {
-      yield* note(`[单魂] 灵魂 ${alive[0].soul.name} 直接放行（无表决）\n`)
-      yield* release(alive[0], { mode: 'single', result: 'single' })
+      // 配置态单魂每步宣告已删（2026-08-30 瘦身）：模式是用户自选，chip 上有
+      yield* releaseGated(alive[0], { mode: 'single', result: 'single' })
       return
     }
     yield* note(`[警告] 仅灵魂 ${alive[0].soul.name} 存活，直接放行\n`)
-    yield* release(alive[0], { mode: 'fallback', result: 'single' })
+    yield* releaseGated(alive[0], { mode: 'fallback', result: 'single' })
     return
   }
-  yield* note(`[盲写] ${alive.length} 个灵魂完成: ${alive.map(d => d.soul.name).join(', ')}\n`)
   yield* narrateDrafts(alive, '', { pending: true })
 
   // 阶段 2：表决，全程仅 1 次——每魂 1 票、只投别人（候选卡不含自己那份）→ 票数最高放行；
@@ -2182,9 +2384,9 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
   // 免表决：各稿文本与工具调用参数完全一致 → 表决/融合都没有信息量，直接放行候选 1
   if (alive.every(d => fingerprint(d) === fingerprint(alive[0]))) {
     const chosen = alive[0]
-    yield* note(`\n[通过] ${cnNum(alive.length)}稿一致，免表决 → 放行 灵魂 ${chosen.soul.name}\n`)
+    yield* note(`\n${cnNum(alive.length)}稿一致，放行 ${chosen.soul.name}\n`)
     ctx.logger?.info(`trisoul: ${alive.length} 稿一致，免表决 → 灵魂 ${chosen.soul.name}`)
-    yield* release(chosen, { mode: 'winner', result: 'identical', rounds: round })
+    yield* releaseGated(chosen, { mode: 'winner', result: 'identical', rounds: round })
     return
   }
   // 近似免表决（P2-4）：工具调用语义相似 + 正文两两相似度全超阈 → 实质一致，放行正文最长的一份
@@ -2207,9 +2409,9 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
     }
     if (minSim >= cfg.nearIdenticalSimilarity) {
       const chosen = alive.reduce((best, d) => (draftBody(d).length > draftBody(best).length ? d : best), alive[0])
-      yield* note(`\n[通过] ${cnNum(alive.length)}稿实质一致（工具调用相似，正文相似度 ${Math.round(minSim * 100)}% ≥ 阈 ${Math.round(cfg.nearIdenticalSimilarity * 100)}%），免表决 → 放行 灵魂 ${chosen.soul.name}（正文最长）\n`)
+      yield* note(`\n${cnNum(alive.length)}稿基本一致，放行 ${chosen.soul.name}\n`)
       ctx.logger?.info(`trisoul: ${alive.length} 稿实质一致（相似度 ${minSim.toFixed(2)}），免表决 → 灵魂 ${chosen.soul.name}`)
-      yield* release(chosen, { mode: 'winner', result: 'identical', near: true, rounds: round })
+      yield* releaseGated(chosen, { mode: 'winner', result: 'identical', near: true, rounds: round })
       return
     }
   }
@@ -2217,12 +2419,11 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
   const n = alive.length
   const m = n - 1   // 每个投票者看到的候选数 = 别人的稿（不含自己那份：防只投自己，输入也更短）
   // 选票 = 候选两段卡全文（v2 删选票截断：稿子已是蒸馏两段，零截断原样发，物理墙/注水分配不复存在）。
-  // 票面附投票人自己的稿（标注不可投）——只用于发现互补（salvage = tips 闸门）
+  // 票面附投票人自己的稿（标注不可投）——只用于发现分叉（divergence = tips 闸门 + 平票破平的知情票判据）
   const ballotFor = (perm, selfIdx) => ({
     text: perm.map((ci, k) => `[Candidate ${k + 1}]${alive[ci].toolCalls ? ` (with ${alive[ci].toolCalls} tool calls)` : ''}\n${fullCard(alive[ci])}`).join('\n\n'),
     self: fullCard(alive[selfIdx]),
   })
-  yield* note(`\n[表决] ${n} 份候选，每人 1 票、只投别人${m === 1 ? '（两魂互审对方稿）' : ''}，表决中...\n`)
   // 结构化选票开关：表决用 cast_ballot 工具；关掉则退回纯文本 JSON
   const useTool = cfg.ballotTool !== false
   // 尺②：只问「哪一份可以原样作为这一步的回复直接放行」；风格 / 篇幅 / 整任务未闭环都不是理由。
@@ -2249,13 +2450,15 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
         : { ...parseBallot(v.text, { m, perm }), via: 'text' }
     }
     // 选票不合要求（工具参数坏 / 无 JSON / 被输出上限截断）也重试：第 k 次尝试 maxTokens 放大 k 倍（推理模型思考吃预算）
+    // ⑥ 半截票不算票（08-30 用户拍板；0829 批 pest 病例：5 张截断票靠正则从半截正文抠出 pick、2 张改了胜负）：
+    //   截断一律判未解析 → 重试；用尽仍截断 = 弃权。正则兜底只服务没截断的文本票。
     const validate = (v) => {
       const b = readBallot(v)
-      return b.parsed ? undefined : `选票${b.via === 'tool' ? '工具参数不合法' : v.truncated ? '被输出上限截断' : '不含可解析 JSON'}`
+      return (b.parsed && !v.truncated) ? undefined : `选票${v.truncated ? '被输出上限截断' : b.via === 'tool' ? '工具参数不合法' : '不含可解析 JSON'}`
     }
     const submit = useTool
-      ? `Submit via the ${BALLOT_TOOL} tool (${m === 1 ? 'pick=1 to release, pick=0 to withhold' : 'pick is the candidate number, digits only'}; reason in one sentence; salvage as above); do not write the ballot in prose. Only if you cannot call the tool, fall back to printing JSON only: {"pick": ${m === 1 ? 1 : 2}, "reason": "one sentence", "salvage": ""}`
-      : `Print JSON only: {"pick": ${m === 1 ? '1 or 0' : '<candidate number>'}, "reason": "one sentence", "salvage": "as above, may be empty"} (pick is a bare number — not "candidate 2")`
+      ? `Submit via the ${BALLOT_TOOL} tool (${m === 1 ? 'pick=1 to release, pick=0 to withhold' : 'pick is the candidate number, digits only'}; divergence as described above — empty string if none); do not write the ballot in prose. Only if you cannot call the tool, fall back to printing JSON only: {"pick": ${m === 1 ? 1 : 2}, "divergence": ""}`
+      : `Print JSON only: {"pick": ${m === 1 ? '1 or 0' : '<candidate number>'}, "divergence": "as described above, empty string if none"} (pick is a bare number — not "candidate 2")`
     return callSoul(ctx, (attempt) => soulOptions(options, d.soul, 'vote', {
       tools: useTool ? [ballotToolSchema(m)] : undefined,
       maxTokens: cfg.voteMaxTokens > 0 ? cfg.voteMaxTokens * attempt : undefined,
@@ -2265,9 +2468,10 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
         (m === 1
           ? `Below is another candidate response to the same request (the only one; your own draft is not among them).\n${ballot.text}\n\n`
           : `Below are ${m} candidate responses to the same request.\n${ballot.text}\n\n`) +
-        // D1 败稿回收：附自己稿只为找互补——明说不可投、不作评判基准（护「无我评判」，2026-08-21 用户拍板的张力处理）
+        // 自稿对照区（2026-08-28 表决重设计）：附自己稿只为发现分叉——护栏照旧（不可投、不作评判基准），
+        // 用途从「找互补写 salvage」换成「找实质分叉写 divergence」；空 = 干净背书
         `[Your own draft — for comparison only, not votable]\n${ballot.self}\n` +
-        `The draft above is your own: it is not among the candidates, you cannot vote for it, and don't use it as the yardstick to pick faults in the candidates. It has exactly one use — if, comparing against it, you find substantive content your draft has that the candidate you're voting for lacks (a concrete finding / evidence result / risk), put that into the ballot's salvage field (one or two factual sentences); otherwise leave salvage empty.\n\n` +
+        `The draft above is your own: it is not among the candidates, you cannot vote for it, and don't use it as the yardstick to pick faults in the candidates. It has exactly one use — spotting forks: if your draft made a genuinely different call from the candidate you pick (one that would change behavior or output), record it in the ballot's divergence field as ${m === 1 ? "'mine does X; this one does Y'" : "'mine does X; the one I picked does Y'"}; otherwise leave divergence empty.\n\n` +
         (m === 1
           ? `Answer one question only: can it ship as-is as the reply for this step?\n`
           : `Answer one question only: which one can ship as-is as the reply for this step? Choose exactly 1.\n`) +
@@ -2281,7 +2485,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
         const partial = e?.partial ? readBallot(e.partial) : null
         const tries = e?.attempts > 1 ? `，已重试 ${e.attempts - 1} 次` : ''
         const rawText = partial?.via === 'tool' ? String(partial.toolArgs ?? '') : (e?.partial?.text ?? '')
-        return { ...base, picks: [], labels: [], parsed: false, via: 'none', salvage: '', reasoning: e?.partial?.reasoning ?? '', attempts: e?.attempts ?? 1,
+        return { ...base, picks: [], labels: [], parsed: false, via: 'none', divergence: '', reasoning: e?.partial?.reasoning ?? '', attempts: e?.attempts ?? 1,
           raw: rawText.trim() ? rawText.trim() : undefined,
           reason: `（弃权：${e?.code === 'TIMEOUT' ? `表决${e.message}` : e?.code === 'INVALID_OUTPUT' ? e.message : `表决失败 ${describeErr(e)}`}${tries}）` }
       })
@@ -2290,7 +2494,6 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
   const nameOf = (i) => alive[i].soul.name
   // 缺陷2（2026-08-24）：「候选N」是投票者私有编号——每张票的候选卡各自乱序，同一个 N 在三张票里指三个不同的魂，
   // 逐票读必然误导。旁白呈现直写真身（映射本就在 v.perm 手里）；喂投票魂的候选卡照旧匿名乱序，一个字不动。
-  const pickLabel = (i) => `灵魂 ${nameOf(i)}`
   /** 票据 reason 是模型用自己那张票的编号写的 → 按这张票的 perm 还原成真身。
    *  覆盖单数与枚举式复数（"candidates 1 and 2" 是高频写法，只还原头一个会剩个裸编号，比不还原更误导）、
    *  大小写、井号、繁体。两条保守边：整段里只要有一个编号指不到人就整段原样不动（映射错比不映射更糟）；
@@ -2302,86 +2505,128 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
     return m.replace(/^(?:候选|候選|candidates?)\s*#?\s*/i, '').replace(/#?\d+/g, () => `灵魂 ${names.shift()}`)
   })
   const voteWord = (v) => v.picks.length ? v.picks.map(nameOf).join('+') : v.reject ? '不放行' : '弃权'
-  for (const v of votes) {
-    // 弃权时 reason 本身就是「（弃权：原因）」，不再重复前缀
-    const why = deanonReason(v, v.reason)
-    const reasonStr = v.reason ? (v.picks.length || v.reject ? `：${why}` : why.startsWith('（弃权') ? why : `（弃权：${why}）`) : ''
-    yield* note(`  灵魂 ${v.soul} → ${v.picks.length ? v.picks.map(pickLabel).join(' + ') : v.reject ? `不放行（灵魂 ${nameOf(v.perm[0])} 的稿）` : '弃权'}${v.via === 'text' ? '（文本票）' : ''}${reasonStr}\n`)
+  // 一行票面（2026-08-30 瘦身）：谁投谁 + 结果；分叉全文/文本票标记/投票理由归监控页（vote 事件已带真身）。
+  // 弃权原因剥掉系统套壳只留白话。
+  const abstainWhy = (v) => {
+    if (v.picks.length || v.reject || !v.reason) return ''
+    const m = String(v.reason).match(/^（弃权：?(.*)）$/)
+    return `（${m ? m[1] : v.reason}）`
   }
-  const tallyStr = alive.map((d, i) => `${d.soul.name} ${tally.counts[i]} 票`).join('，')
+  const seg = (v) => v.picks.length ? `${v.soul}→${v.picks.map(nameOf).join('+')}`
+    : v.reject ? `${v.soul} 不放行` : `${v.soul} 弃权${abstainWhy(v)}`
   const voteStr = votes.map(v => `${v.soul}→${voteWord(v)}`).join(', ')
   const chosen = alive[tally.chosenIdx]
-  // 事件：picks 为灵魂名（0/1 个）；tie 只在真的动用了平票轮换（平票 / 全员弃权）选出候选时为 true
+  // 事件：picks 为灵魂名（0/1 个）；tie 只在真的动用了平票破平（平票 / 全员弃权）选出候选时为 true；tieKind 见 tallyVotes
   report({
-    phase: 'vote', round, ballots: 1, total: votes.length, tie: tally.tie, decision: tally.decision,
+    phase: 'vote', round, ballots: 1, total: votes.length, tie: tally.tie, decision: tally.decision, tieKind: tally.tieKind,
     counts: alive.map((d, i) => ({ soul: d.soul.name, votes: tally.counts[i] })),
     winner: chosen.soul.name,
     votes: votes.map(v => ({
       soul: v.soul, picks: v.picks.map(nameOf), labels: v.labels, parsed: v.parsed, via: v.via, order: v.order, attempts: v.attempts,
       ...(v.raw ? { raw: v.raw } : {}),
       best: v.picks.length ? v.picks.map(nameOf).join(' + ') : null, ...(v.reject ? { reject: true } : {}),
-      salvage: v.salvage,   // tips 闸门：恒带 salvage 位（空串也带）——监控以「带位票数」为 claim 率分母
-      reason: v.reason, reasoning: v.reasoning,
+      divergence: deanonReason(v, v.divergence ?? ''),   // 恒带位（空串也带）——监控以「带位票数」为知情率分母；旁白弃显后监控是唯一明细面，编号还原真身
+      reason: deanonReason(v, v.reason), reasoning: v.reasoning,
     })),
   })
-  // 胜者放行（平票 / 全员弃权时 chosenIdx 已是轮换结果，v2 无融合轮）
-  yield* note(tally.decision === 'abstain'
-    ? `[放行] 全员弃权（${tallyStr}）→ 按轮次轮换选 灵魂 ${chosen.soul.name}\n`
+  // 胜者放行（平票时 chosenIdx 已是破平结果，v2 无融合轮）：一行结果收口
+  const tail = tally.decision === 'abstain' ? `⇒ 全员弃权，轮换胜 ${chosen.soul.name}`
     : tally.tie
-      // 措辞中性：tie 覆盖双放行 [1,1]、双拒 [0,0]、环投 [1,1,1] 等所有最高票并列场景，
-      // 旧文案「双方都放行对方的稿」在后两类是事实性错误（2026-08-26 B1）
-      ? `[通过] 平票（${tallyStr}）→ 按轮次轮换选 灵魂 ${chosen.soul.name}\n`
-      : `[通过] 胜者: 灵魂 ${chosen.soul.name}（${tallyStr}）\n`)
-  ctx.logger?.info(`trisoul: 表决 ${voteStr} → 胜者 灵魂${chosen.soul.name}${tally.tie ? '（平票轮换）' : ''}`)
-  // v2 tips 闸门（2026-08-26 用户令放宽：**所有票**的非空 salvage 都算 claim，不再只收投给胜稿的票——
-  // 票越分散 tips 越少不合理；败稿方向的互补线索同样喂给胜者，tipsMessage 本就令其自行判断价值。
-  // 唯一排除：胜者自己那张票——其 salvage 引用的内容就在放行的胜稿里，喂回是重复）。
-  // 工具步 → tips 挂账，下一次同会话请求由胜者独走吸收；收官步 → 放行前胜者补一轮吸收。无 claim → 直接放行（独走步不存在）
-  const claims = votes
-    .filter(v => v.soul !== chosen.soul.name && typeof v.salvage === 'string' && v.salvage.trim())
-    .map(v => ({ voter: v.soul, claim: v.salvage.trim(), draft: alive.find(d => d.soul.name === v.soul) }))
-    .filter(c => c.draft)
-  if (!claims.length) {
-    yield* release(chosen, { mode: 'winner', result: 'winner', rounds: round, votes: voteStr, tie: tally.tie })
+      ? (tally.tieKind === 'resolved'
+        ? `⇒ 平票，知情票（${nameOf(tally.resolvedBy)}）定胜 ${chosen.soul.name}`
+        : `⇒ 平票，轮换胜 ${chosen.soul.name}`)
+      : `⇒ 胜 ${chosen.soul.name}`
+  yield* note(`\n表决 ${votes.map(seg).join(' · ')} ${tail}\n`)
+  ctx.logger?.info(`trisoul: 表决 ${voteStr} → 胜者 灵魂${chosen.soul.name}${tally.tie ? `（平票 ${tally.tieKind}）` : ''}`)
+
+  // ---- tips 收集（2026-08-28 表决重设计）----
+  // 明胜 / resolved：非胜者票的非空 divergence（明胜下两败者必投了胜者 → 分叉天然对准胜稿）；弃权魂的稿恒附。
+  // deadlock / degraded：全量送稿——未选中的稿全部附上，有分叉带分叉、无分叉标 reference、弃权标 unassessed；
+  //   deadlock 额外补比：分叉没对准胜者的败者对着胜稿再写一次（环结构下恰一人；失联降级为 between 照送）。
+  // 唯一排除：胜者自己那张票（胜者对自己稿的选择本就知情）。
+  const framing = (tally.tieKind === 'deadlock' || tally.tieKind === 'degraded') ? 'rotation' : 'winner'
+  const loserIdxs = alive.map((_, i) => i).filter(i => i !== tally.chosenIdx)
+  const yield_note = []   // 补比在 async 函数里跑，旁白攒着回到生成器再 yield
+  /** 补比：败者 li 对着胜稿写分叉（工具优先、文本 JSON 兜底）；成功 → 覆写其 divergence 并标 refork；失败 → 原样 */
+  const forkAgainstWinner = async (li) => {
+    const d = alive[li]
+    const stopBeat = heartbeat('fork', { soul: d.soul.name, winner: chosen.soul.name })
+    const readFork = (v) => {
+      const call = toolCallsOf(v.chunks).filter(c => c.name === FORK_TOOL).at(-1)
+      if (call) { try { const o = typeof call.arguments === 'string' ? JSON.parse(call.arguments) : call.arguments; if (o && typeof o.divergence === 'string') return { ok: true, divergence: o.divergence.trim() } } catch {} }
+      const t = v.text ?? ''
+      return /"divergence"\s*:/.test(t) ? { ok: true, divergence: parseDivergence(t) } : { ok: false }
+    }
+    try {
+      const effort = await jobEffort(d.soul, cfg.voteEffort)
+      const v = await callSoul(ctx, (attempt) => soulOptions(options, d.soul, 'fork', {
+        tools: useTool ? [forkToolSchema()] : undefined,
+        maxTokens: cfg.voteMaxTokens > 0 ? cfg.voteMaxTokens * attempt : undefined,
+        reasoningEffort: effort,
+        messages: tailWindow(options.messages, 4),
+        instruction: mkMsg(`fork-${d.soul.name}`,
+          `Below is another candidate response to the same request, alongside your own draft.\n[The draft]\n${fullCard(chosen)}\n\n[Your own draft]\n${fullCard(d)}\n\n` +
+          `One question only: where do you two genuinely fork — a call made differently that would change behavior or output? State each fork as 'mine does X; this one does Y'. Material forks only — not style, wording, or thoroughness. If this draft is simply better across the board, or equivalent to yours, answer with an empty string — never pad.\n` +
+          (useTool ? `Submit via the ${FORK_TOOL} tool; do not answer in prose. Only if you cannot call the tool, print JSON only: {"divergence": ""}` : `Print JSON only: {"divergence": ""}`)),
+      }, cfg), timeout, retryOpts('fork', d.soul, { validate: (v) => readFork(v).ok ? undefined : '补比输出不含 divergence' }))
+      const r = readFork(v)
+      votes[li].divergence = r.divergence; votes[li].refork = true
+      report({ phase: 'fork', soul: d.soul.name, winner: chosen.soul.name, divergence: r.divergence })
+      yield_note.push(`  [补比] 灵魂 ${d.soul.name} 对着胜稿重写分叉 → ${r.divergence ? r.divergence : '（无分叉，胜稿全面覆盖）'}\n`)
+    } catch (e) {
+      report({ phase: 'fork', soul: d.soul.name, winner: chosen.soul.name, error: describeErr(e) })
+      yield_note.push(`  [补比] 灵魂 ${d.soul.name} 失联（${describeErr(e)}）→ 原分叉按附稿之间照送\n`)
+    } finally { stopBeat() }
+  }
+  if (tally.tieKind === 'deadlock') {
+    for (const li of loserIdxs) if (hasFork(votes[li]) && votes[li].picks[0] !== tally.chosenIdx) await forkAgainstWinner(li)
+    for (const line of yield_note) yield* note(line)
+  }
+  const tips = loserIdxs.flatMap(li => {
+    const v = votes[li], d = alive[li]
+    const kind = !v.parsed ? 'unassessed'
+      : hasFork(v) ? ((v.refork || v.picks[0] === tally.chosenIdx) ? 'pointed' : 'between')
+        : 'reference'
+    if (kind === 'reference' && framing !== 'rotation') return []
+    return [{ voter: v.soul, kind, divergence: hasFork(v) ? v.divergence.trim() : '', thinking: d.thinking ?? '', output: d.output ?? '' }]
+  })
+  if (!tips.length) {
+    yield* releaseGated(chosen, { mode: 'winner', result: 'winner', rounds: round, votes: voteStr, tie: tally.tie })
     return
   }
-  // B5 终裁：thinking 直接用四格拼合文（含 plan），tips 零特殊处理——plan 自然传递即是全部
-  const tips = claims.map(c => ({ claim: c.claim, thinking: c.draft.thinking ?? '', output: c.draft.output ?? '' }))
+  const claims = tips.map(t => ({ voter: t.voter, kind: t.kind, divergence: t.divergence }))
   const winnerHasTools = toolCallsOf(chosen.chunks).length > 0
-  report({ phase: 'tips', round, winner: chosen.soul.name, dest: winnerHasTools ? 'solo' : 'final', claims: claims.map(c => ({ voter: c.voter, claim: c.claim })) })
+  report({ phase: 'tips', round, winner: chosen.soul.name, dest: winnerHasTools ? 'solo' : 'final', framing, claims })
   if (winnerHasTools) {
     // 工具步：tips 挂账（只活到下一次同会话请求，不进会话历史），胜稿照常放行 → 宿主执行工具
     if (options.sessionId != null) {
-      pendingTips.set(options.sessionId, { winnerSoul: chosen.soul.name, tips })
-      yield* note(`\n[tips] ${claims.length} 条互补声明指向胜稿 → 挂账，下一步由 灵魂 ${chosen.soul.name} 独走吸收\n`)
-      ctx.logger?.info(`trisoul: ${claims.length} 条 claim 指向胜稿 → 挂账独走（灵魂 ${chosen.soul.name}）`)
+      pendingTips.set(options.sessionId, { winnerSoul: chosen.soul.name, tips, framing })
+      ctx.logger?.info(`trisoul: ${tips.length} 条 tips → 挂账独走（灵魂 ${chosen.soul.name}，${framing}）`)
     } else {
-      yield* note(`\n[tips] ${claims.length} 条互补声明指向胜稿，但本请求无会话上下文无法挂账 → 丢弃\n`)
-      ctx.logger?.warn('trisoul: claim 无 sessionId 可挂账，丢弃 tips')
+      yield* note(`\n[tips] ${tips.length} 条改进线索无会话上下文可挂账 → 丢弃\n`)
+      ctx.logger?.warn('trisoul: tips 无 sessionId 可挂账，丢弃')
     }
-    yield* release(chosen, { mode: 'winner', result: 'winner', rounds: round, votes: voteStr, tie: tally.tie, tips: tips.length })
+    yield* releaseGated(chosen, { mode: 'winner', result: 'winner', rounds: round, votes: voteStr, tie: tally.tie, tips: tips.length })
     return
   }
   // 收官步（胜稿无工具调用）：放行前胜者魂带 tips 私下补一轮（同独走形态：② tips=消息尾 user 直令、匿名），放行第二稿；
   // 失联 → 放行原胜稿（胜稿地位不因补一轮失败动摇）
-  yield* note(`\n[tips] ${claims.length} 条互补声明指向胜稿（收官步）→ 灵魂 ${chosen.soul.name} 放行前补一轮吸收\n`)
-  ctx.logger?.info(`trisoul: ${claims.length} 条 claim 指向胜稿（收官步）→ 灵魂 ${chosen.soul.name} 补一轮`)
+  ctx.logger?.info(`trisoul: ${tips.length} 条 tips（收官步）→ 灵魂 ${chosen.soul.name} 补一轮`)
   // T4：收官补一轮同样是放行前的一段静默等待（用户已经看完稿了却迟迟不结束）
   const stopFinaleBeat = heartbeat('finale', { winner: chosen.soul.name, tips: tips.length })
   const [fd] = await gather([chosen.soul], 'draft', '收官补一轮 ', s =>
-    soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: tipsMessage(tips) }, cfg)).finally(stopFinaleBeat)
+    soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: tipsMessage(tips, { framing }) }, cfg)).finally(stopFinaleBeat)
   report({ phase: 'draft', round: round + 1, finale: true, writer: chosen.soul.name,
     alive: fd.error ? [] : [chosen.soul.name], dead: fd.error ? [chosen.soul.name] : [], drafts: [draftInfo(fd)] })
   if (fd.error) {
     yield* narrateDead([fd], '收官补一轮 ')
     yield* note(`[放行] 收官补一轮失联 → 放行原胜稿 灵魂 ${chosen.soul.name}\n`)
     ctx.logger?.warn(`trisoul: 收官补一轮失联，放行原胜稿 灵魂${chosen.soul.name}`)
-    yield* release(chosen, { mode: 'winner', result: 'winner', rounds: round, votes: voteStr, tie: tally.tie, finale: 'failed', tips: tips.length })
+    yield* releaseGated(chosen, { mode: 'winner', result: 'winner', rounds: round, votes: voteStr, tie: tally.tie, finale: 'failed', tips: tips.length })
     return
   }
   yield* narrateRetried([fd], '收官补一轮 ')
   yield* narrateMended([fd], '收官补一轮 ')
-  yield* narrateInner([fd], '收官补一轮 ')
   yield* narrateDrafts([fd], '收官补一轮稿')
-  yield* release(fd, { mode: 'winner', result: 'winner', rounds: round + 1, votes: voteStr, tie: tally.tie, finale: true, tips: tips.length })
+  yield* releaseGated(fd, { mode: 'winner', result: 'winner', rounds: round + 1, votes: voteStr, tie: tally.tie, finale: true, tips: tips.length })
 }

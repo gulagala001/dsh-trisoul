@@ -7,10 +7,17 @@
 # 无需在 settings.yaml 里再声明一遍（手写一份缺 api/baseURL 的定义反而会让整个 providers
 # 段校验失败，连内置的一起丢掉）。API key 在网页「设置 → 模型」里填即可。
 # 想换别的渠道：把下面所有 provider/model 改成你自己的 provider id 与模型名。
-# 注意：TriSoul 的盲写协议要求模型能稳定输出 JSON，做不到的渠道不适配。
+# 盲写协议要求模型输出 JSON：支持强制格式输出的协议会自动上语法锁
+# （openai-responses / openai-completions 的 json_schema、DeepSeek 官方的 json_object），
+# 其余渠道退回提示词软约束——能用，但弱模型可能偶尔跑飞。
 
 # 取消按新旧的自动压缩（TriSoul 架构核心：改由手术刀按内容动刀）
 - id: compaction-basic
+  disabled: true
+
+# 禁用原装 todo 工具：TriSoul 注册同名 todos 投影与自己的任务账本工具（task_map）顶替它——
+# 不禁用会撞投影 key（warn 降级），且原装 todo_write 每轮清空清单
+- id: tool-todo
   disabled: true
 
 # 上下文手术刀
@@ -40,8 +47,9 @@
         model: deepseek-v4-flash
         storePath: __DATA_DIR__/trisoul-memory.json
 
-# 三魂共识（三个灵魂同模型不同温度）。下面的 persona 是 off 档兜底人设——
-# 三官档位 ≠ off 时（见 trisoul-api 的 base.effort）会被对应官的补偿人设全文覆盖。
+# 三魂共识（同一模型的三份实例，不同温度）。这里的 souls 是**兜底名单**：
+# 正常运行时 trisoul-api 每轮下发写死名册 A/B/C（带官位人设，见下方 soulCount 注释），
+# 路由无一可解析才退回这份静态配置。
 - insert:
     - id: trisoul-consensus
       name: '@trisoul/dsh-consensus'
@@ -54,7 +62,7 @@
           - { name: C, provider: deepseek-official, model: deepseek-v4-flash, temperature: 0.9,
               persona: '做事以周全为先：同样完成任务，但主动覆盖异常、边界和请求里没说透的隐含要求，宁可多想一步；存在多个可行方案时优先探索与最直接做法不同的那条并说明理由。' }
 
-# API 后端（Web UI 的监控 / 设置 / 记忆接口）
+# API 后端（Web UI 的监控 / 设置 / 记忆接口 + 灵魂名册解析）
 - insert:
     - id: trisoul-api
       name: '@trisoul/dsh-api'
@@ -64,25 +72,13 @@
         base:
           mode: unified
           unified: { provider: deepseek-official, model: deepseek-v4-flash }
-          souls:
-            - { name: A, title: 求稳, temperature: 0.3,
-                persona: '做事以正确为先：只做请求明确要求的，不确定的先核实或明说，宁可少做也不做错；动手前先确认现状与影响面，存在多个可行方案时选可逆、当场可验证的那条。' }
-            - { name: B, title: 求成, temperature: 0.6,
-                persona: '做事以把事办成为先：走主流程、用最直接的做法，能用就交付，不为边角情况拖住主线；存在多个可行方案时选步骤最少、依赖最少的那条直接落地。' }
-            - { name: C, title: 求全, temperature: 0.9,
-                persona: '做事以周全为先：同样完成任务，但主动覆盖异常、边界和请求里没说透的隐含要求，宁可多想一步；存在多个可行方案时优先探索与最直接做法不同的那条并说明理由。' }
-          # 三魂 effort 档位（off / light / standard / max）——按位映射上面三个灵魂 A/B/C。
-          # ≠ off 时，该魂的 persona 被对应「官」的补偿人设全文覆盖（上面 title/persona 退为 off 档兜底），
-          # 并解锁一件专属取证工具（专属排他，盲写内层可调）：
-          #   align   对齐官 · 做什么   → task_original（取回用户逐字原话，对抗压缩后的转述漂移）
-          #   erudite 博识官 · 凭什么做 → web_search / web_fetch（把「我记得」逼成有出处的事实）
-          #   empiric 实证官 · 做对没有 → run_verify（node --check / tsc --noEmit，只读检查不执行你的代码）
-          # 这里给 max，和 DeepSWE 那轮评测同配置。嫌贵就在网页「设置 → 三魂档位」降到 standard/light，
-          # 或整栏改 off 退回上面的求稳/求成/求全老人设（输入立刻小一截）。
-          effort:
-            align: max
-            erudite: max
-            empiric: max
+          # 灵魂数量 1 / 2 / 3（名册 A/B/C 与官位人设写死在代码里；设置页可改，即改即存下一轮生效）：
+          #   3 = 对齐 + 博识 + 实证 三官表决（默认，和 DeepSWE 那轮评测同编制）
+          #     对齐官 · 做什么   → task_map（任务账本：动手前铺成清单，做一条勾一条）
+          #     博识官 · 凭什么做 → web_search / web_fetch（把「我记得」逼成有出处的事实）
+          #     实证官 · 做对没有 → verify_link（给结论挂证据：引原文或真跑验证命令，命令过安全门名单）
+          #   2 = 对齐 + 实证 互投；1 = 博识官单独作答，不表决。嫌贵就降魂数。
+          soulCount: 3
 
           # 共识过程参数（与主线开发机同配置）
           consensus:
@@ -90,6 +86,7 @@
             innerEvidence: true         # 内层取证：盲写期间允许调专属工具（false = 连专属工具一起关）
             voteEffort: off             # 表决这类小作业不思考，省钱提速
             replayReasoning: latest     # 胜者的思考折进历史活一轮（下下轮剥掉）
+            voteMaxTokens: 16000        # 选票输出上限（截断票自动翻倍重试；起点给足就少走弯路）
             soulTimeoutMs: 1800000      # 单魂一次调用总上限 30 分钟（0 = 不限，靠 idle 兜底）
             reasoningFuseChars: 500000  # 思考超 50 万字符熔断，防失控思维链
           # 记忆范围：session=会话级 / project=项目级 / full=完全版。只影响之后新开的会话。

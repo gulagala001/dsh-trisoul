@@ -45,9 +45,9 @@ const CONSTITUTION = `You are the agent's memory scribe, maintaining a layered l
 Record only stable facts worth remembering across sessions: user-stated preferences / conventions / parameters, settled decisions, lessons from failures — for a lesson, record the why alongside the rule; a lesson without its reason cannot be judged or applied later — and environment quirks. Do not record process details, one-off content, transient state, or progress chatter like "task X is done / in progress". Write dates as absolute dates (resolve "yesterday" / "last week" against the Today line in the request) — relative words are meaningless in a later session. When unsure, don't record — better too few than too many; a span usually yields 0~2 entries.`
 
 // ===== 单源字段说明（T2 化，2026-08-26 去向表用户亲审）=====
-// 与共识插件四格 ENVELOPE_DESC 同构：同一段说明按渠道双渲染——白名单渠道（config.jsonSchemaProviders，
-// 默认仅 ark-agent）渲染进 json_schema strict 硬锁的字段 description（说明书贴着字段走，schema 全文每请求随发）；
-// 其余渠道渲染回 prompt 尾的散文 Field guide（ark plan/v3 网关对 json_schema 静默无视——说明只住 schema
+// 与共识插件四格 ENVELOPE_DESC 同构：同一段说明按渠道协议双渲染——有锁协议（openai-responses / openai-completions，
+// 2026-08-30 起按协议判、不再按渠道名白名单）渲染进 json_schema strict 硬锁的字段 description（说明书贴着字段走，schema 全文每请求随发）；
+// 其余协议 / 协议未知渲染回 prompt 尾的散文 Field guide（无锁的网关对 json_schema 静默无视——说明只住 schema
 // 会一个字都到不了模型）。语义全部承袭旧 CONSTITUTION/DIGEST_FORMAT，只去重不删义：
 // workdoc 模板行与正段、nowCompactable 模板行与正段各合并为一处；写入纪律与旧宪法 Discipline 句合并住 ops。
 const OPS_DESC = Object.freeze({
@@ -67,7 +67,7 @@ const DIGEST_DESC = Object.freeze({
   overlap: `the existing memories contain duplicate / near-duplicate entries about the same matter (informs the curation job); false when uncertain`,
   conflict: `existing memories contradict each other or the new events (informs the curation job); false when uncertain`,
 })
-/** 散文路渲染（非白名单渠道）：模板骨架 + Field guide，由单源说明拼出 */
+/** 散文路渲染（无锁协议 / 协议未知渠道）：模板骨架 + Field guide，由单源说明拼出 */
 const DIGEST_FORMAT = `Output JSON (JSON only):
 {"ops":[{"op":"add|update|retire","scope":"global|cross|project","key":"…","text":"…","target":"…"}],
  "digest":"…","workdoc":"…","compactable":true,"nowCompactable":["…"],"phaseClosed":false,"signals":{"overlap":false,"conflict":false}}
@@ -85,7 +85,7 @@ Field guide:
 - phaseClosed: ${DIGEST_DESC.phaseClosed}
 - signals.overlap: ${DIGEST_DESC.overlap}
 - signals.conflict: ${DIGEST_DESC.conflict}`
-/** JSON 路渲染（白名单渠道）：strict 硬锁——合法 JSON 保证、required 强制全键、越界字段物理拦截 */
+/** JSON 路渲染（有锁协议渠道）：strict 硬锁——合法 JSON 保证、required 强制全键、越界字段物理拦截 */
 const OPS_SCHEMA = Object.freeze({
   type: 'array', description: OPS_DESC.ops,
   items: {
@@ -135,7 +135,7 @@ const CURATE_RULES = `You are now doing the curation job: inspect the memory sto
 the bracketed tail of each entry is reference signals [age since first record · updated since last change · injected times injected (last) · recalled recall hits (last) · src origin · v override-chain depth] —
 they are reference signals, not thresholds: long-unused does not mean it should retire, freshly written does not mean it should stay, and src user entries were written by the user's own hand — respect them especially; keep / merge / retire is your holistic judgment.
 Never rewrite for nicer wording; never split or expand entries. Keep each entry's text in its original language. If nothing is wrong, "ops": [].`
-// 散文路也要 Field guide（2026-08-26 M1）：schemaLocked 为 false 是默认常态（provider=ark 不在白名单），
+// 散文路也要 Field guide（2026-08-26 M1）：协议未知 / 无锁协议时走散文路，
 // 只给裸骨架时 key 格式与 add-vs-update 纪律一个字都到不了模型；scope 判据已在 CURATE_RULES 3) 不重复
 const CURATE_FORMAT_TAIL = `Output JSON only: {"ops":[{"op":"add|update|retire","scope":"global|cross|project","key":"…","text":"…","target":"…"}]}
 Field guide:
@@ -151,6 +151,8 @@ export function createMemoryHub(ctx, config = {}) {
   const storePath = config.storePath ?? './trisoul-memory.json'
   const provider = config.provider ?? 'ark'
   const model = config.model ?? 'deepseek-v4-flash'
+  /** 静态路由的渠道协议（无头评测 dockerkit 写 api: openai-responses）；只对静态 provider 生效 */
+  const staticApi = typeof config.api === 'string' && config.api ? config.api : undefined
   // 消化频率：真机反馈「太频繁」——每 3 条事件就跑一次太碎；默认攒 8 条、上限 24 条、闲 90s 冲刷（可配）
   // 2026-08-18 用户令「不要任何截断和预算类限制」：单批上限 / 续传上限 / 注入条数 / 上下文条数 / 事件字数默认全部不设，
   // 只有用户显式给正数才生效（旧默认 24 / 30 / 20 / 30 / 800 会丢事件、丢记忆、把文件内容截成开头）
@@ -294,7 +296,9 @@ export function createMemoryHub(ctx, config = {}) {
     idleTimer.unref()
   }
   async function onIdle() {
-    await digestNext(true)
+    // 08-30 S10：空闲冲刷把每个有积压的会话都消化掉——此前只消化第一个就 return 且不重武装定时器，
+    // 其余会话的零头（< batch）要等任意会话再来新事件才有机会（两个会话都结束就本进程内永不消化）
+    for (let guard = pending.size + 1; guard > 0 && !disposed && !digesting && hasPending(); guard--) await digestNext(true)
     if (disposed || hasPending() || digesting || curating) return
     const sh = pickShard(projectShard(lastProject))
     if (!sh) return
@@ -322,26 +326,44 @@ export function createMemoryHub(ctx, config = {}) {
   // 中枢作业（digest/recall/curate）不需要深思：默认请求 reasoningEffort 'off'（能力门控——
   // 该路由声明支持 off 才传，否则不传用提供商默认）；config.effort='inherit' 完全不干预。
   const effortResolver = createEffortResolver(ctx, { effort: config.effort ?? 'off' })
-  // T2 双渲染管道（2026-08-26）：schema 命中白名单渠道 → onPayload 挂 json_schema strict 硬锁、format 不进 prompt；
-  // 其余渠道 → format（散文 Field guide / 格式尾句）拼在 prompt 尾，行为与旧版逐字一致。
-  // jsonSchemaPayload / providerKey 与 dsh-plugin 的同名实现逐字同源（Responses API 的 text.format；名字规范化比对）。
-  const jsonSchemaPayload = (schema) => (params) => ({ ...params, text: { format: { type: 'json_schema', ...schema } } })
-  const providerKey = (p) => String(p ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
-  const schemaProviders = Array.isArray(config.jsonSchemaProviders) ? config.jsonSchemaProviders : ['ark-agent']
-  const schemaLocked = (provider) => !!providerKey(provider) && schemaProviders.some(x => providerKey(x) === providerKey(provider))
+  // T2 双渲染管道（2026-08-26；2026-08-30 改按协议）：路由协议有锁（openai-responses / openai-completions）→ onPayload 挂
+  // json_schema strict 硬锁、format 不进 prompt；其余协议 / 协议未知 → format（散文 Field guide / 格式尾句）拼在 prompt 尾，
+  // 且 onPayload 只旁观 pi-ai 递来的 model.api 探明协议，下个作业按协议上锁。中枢作业只用 schema 门（json_object 门无 schema，不适合）。
+  // 协议来源（按序）：静态 config.api（仅静态 provider）→ 探明缓存 → 内建适配器固定表 → ctx.bail('trisoul/provider-api')。
+  // jsonSchemaPayload / LOCK_BY_API / ADAPTER_API 与 dsh-plugin 的同名实现逐字同源。
+  const LOCK_BY_API = { 'openai-responses': 'schema', 'openai-completions': 'schema' }
+  const ADAPTER_API = { 'deepseek-official': 'deepseek' }
+  const jsonSchemaPayload = (schema, api) => (params, model) => (model?.api ?? api) === 'openai-completions'
+    ? { ...params, response_format: { type: 'json_schema', json_schema: { name: schema.name, strict: schema.strict, schema: schema.schema } } }
+    : { ...params, text: { format: { type: 'json_schema', ...schema } } }
+  const apiSeen = new Map()
+  const apiOf = (p) => {
+    if (typeof p !== 'string' || !p) return undefined
+    if (staticApi && p === provider) return staticApi
+    if (apiSeen.has(p)) return apiSeen.get(p)
+    if (ADAPTER_API[p]) return ADAPTER_API[p]
+    let v
+    try { v = ctx.bail('trisoul/provider-api', p) } catch { v = undefined }
+    return (typeof v === 'string' && v) ? v : undefined
+  }
+  const observing = (p, hook) => (params, model) => {
+    if (typeof model?.api === 'string' && model.api) apiSeen.set(p, model.api)
+    return hook ? hook(params, model) : params
+  }
   // 书记官的钟：消化/整理 prompt 带当天日期——没有它「昨天」类相对日期无从换算（宪法要求写绝对日期）
   const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
   async function runJob({ purpose, system, prompt, format, schema, maxTokens, sessionId }) {
     let text = ''
     let truncated = false
     const r = route()
-    const locked = !!(schema && schemaLocked(r.provider))
+    const api = apiOf(r.provider)
+    const locked = !!(schema && LOCK_BY_API[api] === 'schema')
     const reasoningEffort = await effortResolver.resolve(r.provider, r.model)
     const stream = ctx.llm.stream({
       ...r,
       ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
       ...(sessionId ? { sessionId } : {}), // 监控按会话归因
-      ...(locked ? { onPayload: jsonSchemaPayload(schema) } : {}),
+      onPayload: observing(r.provider, locked ? jsonSchemaPayload(schema, api) : null),
       purpose,
       maxTokens,
       system,
@@ -937,7 +959,7 @@ export function createMemoryHub(ctx, config = {}) {
   }
 
   // ---- 挑选作业（#13，recall 与补注共用）：pool ≤ allBelow → 全部（mode all）；否则 LLM 按问题 + 状态区快照背景挑（mode llm）；
-  //      失败 → 词面匹配按命中词数排序取前 10（mode lexical）。返回 { hits, mode }。
+  //      失败 → 词面匹配按命中词数排序、不截（limit 默认 0；2026-08-18 用户令不砍前 N）（mode lexical）。返回 { hits, mode }。
   const canvasSnapshot = (sid) => {
     if (!sid) return ''
     let st
@@ -948,8 +970,23 @@ export function createMemoryHub(ctx, config = {}) {
     if (typeof st.status === 'string' && st.status.trim()) parts.push(`Status: ${st.status.trim()}`)
     return parts.join('\n')
   }
+  // 08-30 S7：中文 query 没有空格，按空白切词整句成一个「词」→ 兜底恒 0 条。CJK 连续段改切二字组（单字段留单字），
+  // 拉丁/数字整词照旧；纯标点/符号项剔除（「，」这类几乎所有条目都含，会给全员加分）
+  const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+/u
+  const lexicalTerms = (query) => {
+    const terms = new Set()
+    for (const tok of query.toLowerCase().split(/\s+/).filter(Boolean)) {
+      for (const part of tok.split(/([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+)/u).filter(Boolean)) {
+        if (/^[\p{P}\p{S}]+$/u.test(part)) continue
+        if (!CJK.test(part)) { terms.add(part); continue }
+        if (part.length === 1) terms.add(part)
+        for (let i = 0; i + 1 < part.length; i++) terms.add(part.slice(i, i + 2))
+      }
+    }
+    return [...terms]
+  }
   const lexicalPick = (query, pool, limit = 0) => {
-    const words = [...new Set(query.toLowerCase().split(/\s+/).filter(Boolean))]
+    const words = lexicalTerms(query)
     if (!words.length) return []
     return pool
       .map(m => ({ m, score: words.reduce((n, w) => n + (m.text.toLowerCase().includes(w) ? 1 : 0), 0) }))

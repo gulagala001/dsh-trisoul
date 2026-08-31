@@ -1,9 +1,9 @@
 // TriSoul 上下文手术刀（M3）：CompactionEngine 实现
-// - compactIfNeeded → null：取消按新旧的自动压缩（TriSoul 架构核心主张）
+// - compactIfNeeded → null：取消按新旧的自动压缩（TriSoul 架构核心主张）；compactNow → null：/compact 斜杠命令同样无事发生（宿主回「No compactable history yet.」）
 // - compactRegion：真·区域手术——书记官压缩圈定区间，按三段协议提交
 //   （compaction/start 锁 → compaction/summary 记账 → 紧邻 user/message surfaceOp:replace）
-// - 恒真区执法：区间含用户原话 / 画布状态区最新一版直接拒绝；已换代的状态区旧版（P2-2）可入区间
-//   被顺路吞掉（不进纪要原料——过期工作状态不该进检查点）；已换代的记忆补注旧版（renew 换代制）同理剔出原料
+// - 恒真区执法：区间含用户原话 / 画布状态区最新一版 / todo 清单最新一版直接拒绝；已换代的状态区旧版（P2-2）可入区间
+//   被顺路吞掉（不进纪要原料——过期工作状态不该进检查点）；已换代的记忆补注旧版（renew 换代制）与 todo 清单旧版同理剔出原料
 // - 探针补记搭车（P2-3）：compactRegion 第 5 参 extras.probeNotes——验收未过攒下的问答随这刀并入纪要
 // - 检查点可合并不可丢（P1-2，2026-08-19）：区间可含既有手术检查点——其纪要正文作原料（剥掉契约头行）、
 //   新检查点的「被压区间 seq lo..hi」= 旧检查点头部区间 ∪ 区间事件 seq（trisoul_recall 回捞才不漏）
@@ -152,6 +152,17 @@ export default class TrisoulSurgeon extends CompactionEngine {
     if (region.some(e => isCanvasState(e) && e.seq === liveStateSeq)) {
       throw new Error('TriSoul surgeon: 区间包含画布状态区最新一版（恒真区），拒绝手术')
     }
+    // todo 清单注入（trisoul-consensus 换代制，2026-08-28）：与状态区完全同款——最新一版恒真拒入，
+    // 旧版可入区间被顺路吞掉（判据照 canvas 侧 isTodoListMsg 复制：本仓惯例手术刀零跨包依赖）
+    const isTodoList = (e) => e.type === 'user/message' && e.data?.source?.kind === 'plugin' && e.data?.source?.plugin === 'trisoul-consensus'
+      && (Array.isArray(e.data?.content) ? e.data.content : []).some(b => b?.type === 'text' && String(b.text ?? '').startsWith('[todo list]'))
+    const liveTodoSeq = nodes.reduce((m, seq) => {
+      const e = bySeq.get(seq)
+      return (e && isTodoList(e) && e.seq > m) ? e.seq : m
+    }, -1)
+    if (region.some(e => isTodoList(e) && e.seq === liveTodoSeq)) {
+      throw new Error('TriSoul surgeon: 区间包含 todo 清单最新一版（恒真区），拒绝手术')
+    }
     // 原文（渲染后不含 reasoning）：既是手术刀的原料，也是不变量「检查点必须比原文短」的基准。
     // 区间里的旧检查点（P1-2）按「[checkpoint seq a..b] 纪要正文」进原料（契约头行剥掉——那是给主模型看的回捞指引，不是事实）；
     // 已换代的状态区旧版不进原料（工作状态快照已被新版取代，进纪要只会掺入过期状态）——但照常被遮蔽（这刀顺路把它清走）；
@@ -162,8 +173,8 @@ export default class TrisoulSurgeon extends CompactionEngine {
       const e = bySeq.get(seq)
       return (e && isMemSupplement(e) && e.seq > m) ? e.seq : m
     }, -1)
-    const material = region.filter(e => !isCanvasState(e) && !(isMemSupplement(e) && e.seq !== liveSuppSeq))
-    if (material.length === 0) throw new Error('TriSoul surgeon: 区间只含已换代的状态区/补注旧版，无可纪要内容，拒绝这刀')
+    const material = region.filter(e => !isCanvasState(e) && !isTodoList(e) && !(isMemSupplement(e) && e.seq !== liveSuppSeq))
+    if (material.length === 0) throw new Error('TriSoul surgeon: 区间只含已换代的状态区/补注/todo 清单旧版，无可纪要内容，拒绝这刀')
     const checkpoints = material.map(parseCheckpoint).filter(Boolean)
     const rawRegion = material.map(e => {
       const cp = parseCheckpoint(e)

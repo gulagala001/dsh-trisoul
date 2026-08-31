@@ -1,6 +1,7 @@
 // `trisoul init`：把宿主 + TriSoul 插件装进一个独立目录，全程不碰 ~/.dsh。
 import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { patchOnPayloadAll } from './patch-onpayload.mjs'
 import { patchPiAi } from './patch-pi-ai.mjs'
 import {
   DSH_VERSION, PKG_ROOT, color, ensureDir, fail, layout, log, ok, resolvePnpm, runPnpm, step, warn,
@@ -137,12 +138,15 @@ export async function init({ force = false, dshVersion = DSH_VERSION } = {}) {
   if (runPnpm(pnpm, ['install'], lay.profile) !== 0) { fail('profile 依赖安装失败'); return 1 }
   ok('profile 装配完成')
 
-  // 4. 上游补丁
-  step('打上游补丁（pi-ai 流式解析）')
-  const res = await patchPiAi(lay.host)
-  if (res.missing) warn('没找到 pi-ai，跳过补丁——宿主结构可能变了，遇到卡死请跑 trisoul doctor')
-  else if (res.patched.length) ok(`补丁已打（${res.patched.length} 处）`)
-  else ok('补丁已是最新，无需重打')
+  // 4. 上游补丁（三处：pi-ai 流式解析性能 + 桥/官方适配器放行 onPayload——JSON 格式锁的通道）
+  step('打上游补丁')
+  for (const [label, res] of [['pi-ai 流式解析', await patchPiAi(lay.host)], ...await patchOnPayloadAll(lay.host)]) {
+    const bad = res.missing ? [] : res.skipped.filter(x => /拒绝|回滚|出错|包结构/.test(x))
+    if (res.missing) warn(`${label}：没找到目标包——宿主结构可能变了，遇到问题跑 trisoul doctor`)
+    else if (bad.length) { warn(`${label}：有问题——`); for (const x of bad) log(`    ${x}`) }
+    else if (res.patched.length) ok(`${label}：已打（${res.patched.length} 处）`)
+    else ok(`${label}：已在位`)
+  }
 
   // 5. 装配自检：插件入口能不能被解析
   step('自检')
