@@ -244,7 +244,22 @@ export function createMemoryHub(ctx, config = {}) {
   }
 
   const store = loadStore(storePath)
-  const persist = () => { try { persistStore(storePath, store) } catch (e) { warn(`持久化失败 ${e}`) } }
+  // S5（2026-08-31 perf-audit）分级落盘：persist = 立即整库落盘（记忆内容逐笔即写，崩溃语义不变）；
+  // persistSoon = 防抖合并——仅 usage/注入痕迹这类可再生小账走它（writeFileSync 全量 JSON 原先卡在
+  // recall 工具返回之前与每次注入上；丢了顶多少记一次「用过」，记忆本体永不走防抖）。persist() 吸收挂起的防抖写。
+  let persistTimer = null
+  const persistDebounceMs = Math.max(0, config.persistDebounceMs ?? 1000)
+  const persist = () => {
+    if (persistTimer) { clearTimeout(persistTimer); persistTimer = null }
+    try { persistStore(storePath, store) } catch (e) { warn(`持久化失败 ${e}`) }
+  }
+  const persistSoon = () => {
+    if (persistDebounceMs === 0) return persist()
+    if (persistTimer) return
+    persistTimer = setTimeout(() => { persistTimer = null; persist() }, persistDebounceMs)
+    persistTimer.unref?.()
+  }
+  ctx.effect(() => () => { if (persistTimer) persist() }, 'trisoul-memory: persist flush')
   if (store.migrated) { info(`旧格式记忆库已迁移为 v2（${store.memories.length} 条，默认层级 cross）`); persist() }
 
   // project 键 = 会话 cwd 所在 git 根（同仓库不同子目录共享项目记忆）；无 git 退回 cwd
@@ -541,8 +556,9 @@ export function createMemoryHub(ctx, config = {}) {
   }
   /** 挑该整理的分片：preferred 有待整理就它，否则最久未整理的待整理分片（从未整理过的优先）；都没有 → undefined。 */
   const pickShard = (preferred) => {
-    if (preferred && shardDirty(store, preferred)) return preferred
-    const dirty = shardsOf(store).filter(sh => shardDirty(store, sh))
+    const cross = crossCandidates(store)   // C3：单次挑选只算一次，shardDirty/shardsOf 各处复用
+    if (preferred && shardDirty(store, preferred, cross)) return preferred
+    const dirty = shardsOf(store, cross).filter(sh => shardDirty(store, sh, cross))
     if (!dirty.length) return undefined
     dirty.sort((a, b) => (store.curate.lastAt[a] ?? 0) - (store.curate.lastAt[b] ?? 0))
     return dirty[0]
@@ -722,7 +738,7 @@ export function createMemoryHub(ctx, config = {}) {
   const markInjected = (sid, project, list, source) => {
     const a = sid ? activityOf(sid) : undefined
     if (a) for (const m of list) a.injectedIds.add(m.id)
-    noteUsageAll(list, 'injected', { sessionId: sid }); persist()
+    noteUsageAll(list, 'injected', { sessionId: sid }); persistSoon()   // S5：痕迹小账走防抖
     report({ phase: 'inject', sessionId: sid ?? null, project, count: list.length, source, ids: list.map(m => m.id) })
   }
   /** 半径内可见且本会话未注入的条目（新→旧） */
@@ -1078,7 +1094,7 @@ export function createMemoryHub(ctx, config = {}) {
       const pool = visibleMemories(store, project, radius).filter(m => scope === 'all' || m.scope === scope)
       dbg(`recall: "${query}" scope=${scope} project=${project} (可见 ${pool.length}/${store.memories.length})`)
       const { hits, mode } = await pickMemories({ query, pool, sessionId: session?.id })
-      if (hits.length) { noteUsageAll(hits, 'recalled', { sessionId: session?.id }); persist() }  // 命中即使用痕迹（#10）
+      if (hits.length) { noteUsageAll(hits, 'recalled', { sessionId: session?.id }); persistSoon() }  // 命中即使用痕迹（#10）；S5：防抖不卡工具返回
       report({ phase: 'recall', kind: 'memory', sessionId: session?.id ?? null, project, query: query.slice(0, 200), scope, visible: pool.length, hits: hits.length, mode })
       const memories = hits.map(formatMemoryLine)
       const summary = mode === 'empty' ? `[memory] ${scope === 'all' ? 'No memories visible to this project' : `No ${scope}-scope memories`}`
@@ -1171,9 +1187,11 @@ export function createMemoryHub(ctx, config = {}) {
       injectedTotal += i; recalledTotal += r
       if (i + r === 0) neverUsed++
     }
-    const shards = shardsOf(store).map(shard => ({
+    // C3（2026-08-31 perf-audit）：crossCandidates（O(n²) 近似匹配）单次调用只算一次——旧写法 shardsOf + 逐分片 shardDirty 各自重算，同一请求 2~3 遍
+    const cross = crossCandidates(store)
+    const shards = shardsOf(store, cross).map(shard => ({
       shard, entries: shardEntries(store, shard).length,
-      lastAt: store.curate.lastAt[shard] ?? null, cursor: store.curate.cursors[shard] ?? 0, dirty: shardDirty(store, shard),
+      lastAt: store.curate.lastAt[shard] ?? null, cursor: store.curate.cursors[shard] ?? 0, dirty: shardDirty(store, shard, cross),
     }))
     const lastAts = shards.map(s => s.lastAt).filter(v => Number.isFinite(v))
     return {
@@ -1202,18 +1220,16 @@ export function createMemoryHub(ctx, config = {}) {
     const wire = session?.project
       ? (m) => ({ ...toWire(m), visible: visibleTo(m, session.project, { cap, session: sessionId }), touched: touched.has(m.id) })
       : session ? (m) => ({ ...toWire(m), touched: touched.has(m.id) }) : toWire
+    const health = healthOf()   // C3：counts 与 health 同源复用，免同请求三遍全表扫
     json(res, 200, {
       memories: list.map(wire),
       ...(session ? { session } : {}),
       cursorBySession: { ...store.cursor },
       digestsCount: store.digests.length,
       storePath,
-      health: healthOf(),
-      counts: {
-        total: store.memories.length,
-        active: store.memories.filter(isActive).length,
-        byScope: Object.fromEntries([...SCOPES, 'session'].map(s => [s, store.memories.filter(m => isActive(m) && m.scope === s).length])),
-      },
+      health,
+      // C3：entries/active/byScope 与旧三遍 filter 语义逐字节一致（health 内已按 isActive 同判据算过）
+      counts: { total: health.entries, active: health.active, byScope: health.byScope },
       projects: [...new Set(store.memories.filter(m => m.project).map(m => m.project))],
     })
   }

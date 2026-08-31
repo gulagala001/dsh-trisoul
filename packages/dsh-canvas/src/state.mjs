@@ -151,9 +151,15 @@ export function createStateZone(ctx, { config = {}, runJob, report, warn, dbg = 
   /** 提炼作业：从 cursor 之后的可提炼事件增量提炼恒真条目 + 改写状态摘要。 */
   async function distill(agent, s, sid, signal) {
     const events = agent.session.events
+    // S4（2026-08-31 perf-audit）增量游标：events 只增、seq 单调，从上次扫描位置续扫（游标只前进），
+    // 免每步全表重扫；数组身份变化/收缩（resume/假会话重建）则从头重扫。语义与全表扫描一致：
+    // 待攒批的事件（seq > cursor 但未满 stateEvery）本就要重看，游标只跳过 cursor 之前的定案区。
+    if (s.scanArr !== events || s.scanIdx > events.length) { s.scanArr = events; s.scanIdx = 0 }
+    while (s.scanIdx < events.length && !(events[s.scanIdx].seq > s.cursor)) s.scanIdx++
     let fresh = []
-    for (const e of events) {
-      if (!(e.seq > s.cursor)) continue
+    for (let i = s.scanIdx; i < events.length; i++) {
+      const e = events[i]
+      if (!(e.seq > s.cursor)) continue   // 防御：seq 非单调的假数据仍按原语义过滤
       const r = renderEventText(e, { maxChars: eventChars, skipPluginUser: true })
       if (r) fresh.push(r)
     }

@@ -67,8 +67,15 @@ export const DEFAULT_THRESHOLD_RATIO = 0.5
 export const DEFAULT_THRESHOLD_FALLBACK_CHARS = 1_000_000
 export const DEFAULT_KEEP_TAIL_EVENTS = 30
 export const DEFAULT_MIN_REGION_TOKENS = 4_000
-/** 事件的真实内容 token（P1-6）：只算会进 prompt 的文本（不含 reasoning / 旁白 / JSON 包装） */
-export const contentTokensOf = (e) => estTokens(contentTextOf(e))
+/** 事件的真实内容 token（P1-6）：只算会进 prompt 的文本（不含 reasoning / 旁白 / JSON 包装）。
+ *  S4（2026-08-31 perf-audit）：按事件 memo——正则扫 CJK 是每步全表面重算的另一半成本；事件不可变，同输入恒同输出。 */
+const TOKENS_CACHE = new WeakMap()
+export const contentTokensOf = (e) => {
+  if (!e || typeof e !== 'object') return estTokens(contentTextOf(e))
+  let v = TOKENS_CACHE.get(e)
+  if (v === undefined) { v = estTokens(contentTextOf(e)); TOKENS_CACHE.set(e, v) }
+  return v
+}
 
 // ---------- A 轻量遮蔽刀（2026-08-21 用户拍板；⑦ 2026-08-23 墓碑拆除→自动删除，默认关）----------
 // 换代制注入（状态区 P2-2 / 补注 renew）的旧版本靠「下一刀手术顺路吞」——高频注入下吞速跟不上注速
@@ -154,12 +161,12 @@ export function overThreshold(session, surface, {
   thresholdChars = 0, thresholdRatio = DEFAULT_THRESHOLD_RATIO, thresholdFallbackChars = DEFAULT_THRESHOLD_FALLBACK_CHARS,
 } = {}) {
   // 表面总量按真实内容算（P1-6）：reasoning 不再回灌、JSON 包装不进 prompt，旧口径把它们一起算会高估一倍以上
-  const texts = surface.map(e => contentTextOf(e))
-  const totalChars = texts.reduce((n, t) => n + t.length, 0)
+  // S4（2026-08-31 perf-audit）：走 contentTextOf/contentTokensOf 的按事件 memo，数值与逐次重算逐字节一致
+  const totalChars = surface.reduce((n, e) => n + contentTextOf(e).length, 0)
   if (thresholdChars > 0) return { over: totalChars > thresholdChars, totalChars, limit: `${thresholdChars} 字符` }
   const cw = contextWindowOf(session)
   if (cw) {
-    const totalTokens = texts.reduce((n, t) => n + estTokens(t), 0)
+    const totalTokens = surface.reduce((n, e) => n + contentTokensOf(e), 0)
     const limitTokens = Math.floor(cw * thresholdRatio)
     return { over: totalTokens > limitTokens, totalChars, totalTokens, limitTokens, limit: `${limitTokens} token（窗口 ${cw} × ${thresholdRatio}）` }
   }

@@ -52,7 +52,7 @@ const RUN_TIMEOUT_MS = 300_000
 export function taskMapSchema() {
   return {
     name: TASK_MAP_TOOL,
-    description: "Creates and edits the todo list anchored to the user's own wording — a clear, complete todo list greatly raises the completion rate in medium-to-large tasks. Use it when the task takes three or more distinct steps, when the user lists several things at once, or when new instructions arrive mid-task — capture them right away. Skip it for single-step work and plain conversation — a list there is overhead, not help. op:excerpt copies a block of the user's own words in as the raw material the todo list is parsed from — quote its opening and closing words verbatim ({from, to}) — together with the tasks that cover it (`tasks:[...]` in the same call). Tasks are added, edited and removed through op:add/edit/remove. Keep the list honest as work progresses: remove tasks that are no longer relevant or turn out impossible from the list entirely (op:remove), and rewrite a task overtaken by newer instructions into what can actually be done (op:edit) — say why in your draft. An undoable task left standing blocks delivery forever. Each task selects a sub-range within an excerpt as its `anchor` ({from, to}). op:transcript returns the verbatim list of user messages in this session, numbered [1], [2], … — you only need it when a quote appears in more than one message: check the numbering and add msg to the excerpt. op:view returns the full todo list including excerpts. (To check tasks off, use the todo tool; editing a task itself clears its checkmark and verification links.)",
+    description: "Creates and edits the todo list anchored to the user's own wording — a clear, complete todo list greatly raises the completion rate in medium-to-large tasks. Use it when the task takes three or more distinct steps, when the user lists several things at once, or when new instructions arrive mid-task — capture them right away. Skip it for single-step work and plain conversation — a list there is overhead, not help. op:excerpt copies a block of the user's own words in as the raw material the todo list is parsed from — quote its opening and closing words verbatim ({from, to}) — together with the tasks that cover it (`tasks:[...]` in the same call). Tasks are added, edited and removed through op:add/edit/remove. Keep the list honest as work progresses: remove tasks that are no longer relevant or turn out impossible from the list entirely (op:remove), and rewrite a task overtaken by newer instructions into what can actually be done (op:edit) — say why in your draft. Each task selects a sub-range within an excerpt as its `anchor` ({from, to}). op:transcript returns the verbatim list of user messages in this session, numbered [1], [2], … — you only need it when a quote appears in more than one message: check the numbering and add msg to the excerpt. op:view returns the full todo list including excerpts. (To check tasks off, use the todo tool; editing a task itself clears its checkmark and verification links.)",
     parameters: {
       type: 'object',
       properties: {
@@ -479,21 +479,32 @@ export function createTodoStore({ runTimeoutMs = RUN_TIMEOUT_MS, checkCmd = unde
     return err(`Rejected: unknown op "${String(op)}".`)
   }
 
-  /** todo（三魂共用，actions 栏）：唯一操作编辑完成态；整调用原子 */
-  const execTodo = (session, updates) => {
+  /** todo（三魂共用，actions 栏）：编辑完成态 + 任务消除（2026-08-31 拍板下放；与 task_map op:remove 同语义——原子、未知 id 整拒）；整调用原子 */
+  const execTodo = (session, updates, removeIds) => {
     const rec = getRec(session)
-    if (!Array.isArray(updates) || !updates.length) return err('Rejected: updates must be a non-empty array.')
+    const ups = Array.isArray(updates) ? updates : []
+    const rms = Array.isArray(removeIds) ? removeIds : []
+    if (!ups.length && !rms.length) return err('Rejected: updates or remove must be a non-empty array.')
+    const next = clone(rec)
     const seen = []
-    for (const u of updates) {
+    for (const u of ups) {
       if (typeof u?.id !== 'string' || typeof u?.done !== 'boolean') return err('Rejected: every update needs id and done.')
-      const t = rec.tasks.find(x => x.id === u.id)
+      const t = next.tasks.find(x => x.id === u.id)
       if (!t) return err(`Rejected: unknown task id ${u.id}.`)
-      seen.push([t, u.done])
+      t.done = u.done
+      seen.push([t.id, u.done])
     }
-    for (const [t, done] of seen) t.done = done
-    commit(session, rec, clone(rec))
-    const doneCount = rec.tasks.filter(t => t.done).length
-    return { text: `Updated: ${seen.map(([t, d]) => `${t.id} → ${d ? 'done' : 'open'}`).join(', ')}. Tasks: ${doneCount}/${rec.tasks.length} done.` }
+    for (const id of rms) {
+      if (typeof id !== 'string' || !id) return err('Rejected: remove entries must be task ids.')
+      const i = next.tasks.findIndex(t => t.id === id)
+      if (i < 0) return err(`Rejected: unknown task id ${id}.`)
+      next.tasks.splice(i, 1)
+    }
+    commit(session, rec, next)
+    const parts = []
+    if (seen.length) parts.push(`Updated: ${seen.map(([id, d]) => `${id} → ${d ? 'done' : 'open'}`).join(', ')}.`)
+    if (rms.length) parts.push(`Tasks removed: ${rms.join(', ')}.`)
+    return { text: `${parts.join(' ')} Tasks: ${rec.tasks.filter(t => t.done).length}/${rec.tasks.length} done.` }
   }
 
   /** verify_link（C 专属，lookup 当场执行）：link/run/unlink/view */
@@ -594,13 +605,13 @@ export function createTodoStore({ runTimeoutMs = RUN_TIMEOUT_MS, checkCmd = unde
     const unqualified = rec.tasks.filter(t => !t.links.some(qualified)).length
     return { pass: rec.tasks.length === 0 || (undone === 0 && unqualified === 0), undone, unqualified, total: rec.tasks.length }
   }
-  /** I4：C 独走注入正文——只列真挡路的（未勾 / 无合格链接）；text 证据已合格不进清单 */
-  const unresolvedText = (session) => {
-    const rec = getRec(session)
-    const blocking = rec.tasks.filter(t => !t.done || !t.links.some(qualified))
-    const lines = blocking.map(t => `${t.id} ${box4(t.done)} ${t.title} — ${t.links.length ? t.links.map(deficitClause).join(' · ') : 'no link to real, valid evidence that the task is done'}`)
-    return `[todo list] Unresolved tasks remain:\n${lines.join('\n')}`
-  }
+  /** I4 行生成（全员版/独走版共用）：真挡路的任务（未勾 / 无合格链接）逐行列缺什么；text 证据已合格不进清单 */
+  const blockingLines = (rec) => rec.tasks.filter(t => !t.done || !t.links.some(qualified))
+    .map(t => `${t.id} ${box4(t.done)} ${t.title} — ${t.links.length ? t.links.map(deficitClause).join(' · ') : 'no link to real, valid evidence that the task is done'}`)
+  /** I4 全员版（2026-08-31 闸门分流）：undone>0 弹回全员新一轮的注入正文——纯事实陈述、零引导（用户拍板「只陈述有任务没完成的事实」） */
+  const unresolvedText = (session) => `[todo list] Unresolved tasks remain:\n${blockingLines(getRec(session)).join('\n')}`
+  /** I4 独走版：undone=0 时天然只剩「勾了但证据不合格」行；尾句给 C 两条合法出路（补证 / 取消勾——删除经取消勾走全员轮受表决监督，不点 remove） */
+  const unqualifiedText = (session) => `[todo list] Every task is checked off, but these lack qualifying evidence:\n${blockingLines(getRec(session)).join('\n')}\nLink real evidence, or uncheck what is not actually done.`
   /** I6 追问对象：只靠文字过关、且身上还有没问过的 text 链接的任务 */
   const reviewTargets = (rec) => rec.tasks.filter(t => textOnly(t) && t.links.some(l => l.kind === 'text' && l.asked !== true))
   /** I6 待追问计数（闸门全绿的收官轮查；0 = 不追问） */
@@ -675,7 +686,7 @@ export function createTodoStore({ runTimeoutMs = RUN_TIMEOUT_MS, checkCmd = unde
   }
   const revOf = (session) => getRec(session).rev
 
-  return { execTaskMap, execTodo, execVerifyLink, gateState, unresolvedText, textReviewPending, textReviewText, markTextReviewed, releaseSummary, takeNudge, takeEmptyNudge, maintainInjection, revOf }
+  return { execTaskMap, execTodo, execVerifyLink, gateState, unresolvedText, unqualifiedText, textReviewPending, textReviewText, markTextReviewed, releaseSummary, takeNudge, takeEmptyNudge, maintainInjection, revOf }
 }
 
 // ---------- todo 宿主工具定义（ctx.tools.register 用；描述/参数逐字 spec 3.1/3.2） ----------
@@ -683,7 +694,7 @@ export function createTodoStore({ runTimeoutMs = RUN_TIMEOUT_MS, checkCmd = unde
 export function todoToolDefinition(store) {
   return {
     name: TODO_TOOL,
-    description: "The todo list's completion marker. Decide how a task will be verified before building it, and check it off the moment it is fully done — one at a time, as you go, not all of them at the end. Never check off a task while its tests are failing, the implementation is partial, or an error on it is unresolved; when several are checked together, that must hold for every one of them. Uncheck a task that turns out not to be done.",
+    description: "The todo list's completion marker. Decide how a task will be verified before building it, and check it off the moment it is fully done — one at a time, as you go, not all of them at the end. Never check off a task while its tests are failing, the implementation is partial, or an error on it is unresolved; when several are checked together, that must hold for every one of them. Uncheck a task that turns out not to be done. Remove a task (remove:[ids]) only when it no longer belongs on the list — irrelevant, impossible, or overtaken by newer instructions — never because it is hard; say why in your draft.",
     parameters: {
       type: 'object',
       properties: {
@@ -692,8 +703,9 @@ export function todoToolDefinition(store) {
           description: 'Each entry is {"id": task id, "done": true or false}',
           items: { type: 'object', properties: { id: { type: 'string' }, done: { type: 'boolean' } }, required: ['id', 'done'], additionalProperties: false },
         },
+        remove: { type: 'array', items: { type: 'string' }, description: 'Task ids to delete from the list entirely' },
       },
-      required: ['updates'],
+      required: [],
     },
     output: {
       schema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
@@ -702,10 +714,10 @@ export function todoToolDefinition(store) {
     async execute(args, exec) {
       const session = exec?.agent?.session
       if (!session) throw new Error('todo requires an owning agent session')
-      const r = store.execTodo(session, args?.updates)
+      const r = store.execTodo(session, args?.updates, args?.remove)
       if (r.isError) throw new Error(r.text)
       return { text: r.text }
     },
-    presentCall: (args) => ({ card: 'generic', title: 'Update todo list', kind: 'other', rawInput: args?.updates }),
+    presentCall: (args) => ({ card: 'generic', title: 'Update todo list', kind: 'other', rawInput: args }),
   }
 }

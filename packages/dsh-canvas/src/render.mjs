@@ -75,9 +75,17 @@ export function formatRendered(rendered) {
  * 不含模型 raw reasoning（P0 后历史思考不再回灌）与旁白、不含 JSON 包装与元数据（旧 size=JSON.stringify(data).length 把 reasoning 与
  * 包装一起算进去，区间「够大」实际上没多少真实内容，刀刀落在小段上）。未知类型退回 JSON 原样。
  */
+// S4（2026-08-31 perf-audit）：结果按事件对象 memo——事件不可变（dsh deepFreeze），同输入恒同输出；
+// pickRegion/overThreshold/钉死判据每步对全表面反复调用，重渲染是每步 O(会话长度) 的大头。
+const TEXT_CACHE = new WeakMap()
 export function contentTextOf(event) {
-  const data = event?.data
-  if (!event || !SURFACE_TEXT_TYPES.includes(event.type)) return JSON.stringify(data ?? {})
-  if (event.type === 'user/message') return renderBlocks(data?.content)
-  return renderBlocks(messageOf(data)?.content)
+  if (!event || typeof event !== 'object') return JSON.stringify({})
+  const hit = TEXT_CACHE.get(event)
+  if (hit !== undefined) return hit
+  const data = event.data
+  const text = !SURFACE_TEXT_TYPES.includes(event.type) ? JSON.stringify(data ?? {})
+    : event.type === 'user/message' ? renderBlocks(data?.content)
+      : renderBlocks(messageOf(data)?.content)
+  TEXT_CACHE.set(event, text)
+  return text
 }

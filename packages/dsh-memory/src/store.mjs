@@ -375,13 +375,14 @@ export function normalizeCurateState(raw) {
 }
 const byTsThenId = (a, b) => ((a.ts ?? 0) - (b.ts ?? 0)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 /** 库里当前存在的分片：global / cross（各自有活跃条目才算）+ 每个有活跃条目的项目（子目录旧绑定折入其 git 根项目）。 */
-export function shardsOf(store) {
+export function shardsOf(store, cross = undefined) {
   const active = store.memories.filter(isActive)
   const out = []
   if (active.some(m => m.scope === 'global')) out.push(SHARD_GLOBAL)
   // cross 的活还包括跨项目晋升（素材在 project 层）：只认自身条目会与 shardDirty 的「≥2」互锁，
   // 晋升候选永远排不上号（2026-08-26 M2，真机实证 curate.lastAt 自上线无 cross 键）
-  if (active.some(m => m.scope === 'cross') || crossCandidates(store).length) out.push(SHARD_CROSS)
+  // C3（2026-08-31 perf-audit）：调用方可传预计算的 crossCandidates 结果复用（不传=原地算，行为不变）
+  if (active.some(m => m.scope === 'cross') || (cross ?? crossCandidates(store)).length) out.push(SHARD_CROSS)
   const projects = [...new Set(active.filter(m => m.scope === 'project' && m.project).map(m => m.project))]
   const roots = projects.filter(p => !projects.some(q => q !== p && sameProject(p, q)))
   roots.sort()
@@ -414,11 +415,11 @@ export function markCurated(store, shard, next, now = Date.now()) {
 }
 /** 分片有待整理：从未整理过、上轮未走完（游标>0）、或自上次整理后有条目新增/更新。
  *  cross 另算跨项目晋升候选（素材在 project 层）：自身条目数不设门槛——旧「自身≥2」判据把晋升调度锁死（2026-08-26 M2）。 */
-export function shardDirty(store, shard) {
+export function shardDirty(store, shard, cross = undefined) {
   const entries = shardEntries(store, shard)
   const last = store.curate?.lastAt?.[shard]
   if (shard === SHARD_CROSS) {
-    const cands = crossCandidates(store)
+    const cands = cross ?? crossCandidates(store)   // C3：可复用调用方预计算结果（不传=原地算，行为不变）
     if (cands.length) {
       if (!Number.isFinite(last)) return true
       const latest = Math.max(...cands.flatMap(g => g.entries.map(m => m.updatedAt ?? m.ts ?? 0)))

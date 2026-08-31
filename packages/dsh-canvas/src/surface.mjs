@@ -29,7 +29,10 @@ export function foldPositional(events) {
   return nodes
 }
 
-/** 位置序活表面事件（seq → 事件对象）。 */
+/** 位置序活表面事件（seq → 事件对象）。
+ *  S4（2026-08-31 perf-audit）审后保持全量重建：曾试 WeakMap 增量维护 seq→event 映射，但事件数组存在
+ *  「原位替换中段槽位」的合法用法（canvas.test pickRegion 用例即如此），身份/长度校验兜不住 stale 映射；
+ *  本函数只建 Map 不做渲染，成本远小于 contentTextOf/estTokens（那两处已按事件对象 memo），不值得冒险。 */
 export function surfaceEvents(session) {
   const bySeq = new Map((session?.events ?? []).map(e => [e.seq, e]))
   return surfaceSeqs(session).map(seq => bySeq.get(seq)).filter(Boolean)

@@ -263,8 +263,8 @@ export function apply(ctx, config = {}) {
     }
     return meta
   }
-  function snapshotConfig() {
-    const souls = resolveSouls() ?? []
+  function snapshotConfig(soulsPre = undefined) {
+    const souls = soulsPre ?? resolveSouls() ?? []   // S7：state() 传预解析结果复用（不传=原地算，行为不变）
     return {
       mode: current.mode,
       soulCount: soulCountOf(),
@@ -311,6 +311,9 @@ export function apply(ctx, config = {}) {
   // 与 RECENT_SESSION_KEEP 条最近调用；会话数超 SESSIONS_KEEP 时淘汰最久没动静的。sessionId 缺失归 '?'。
   const SESSIONS_KEEP = 24, TIMELINE_KEEP = 800, RECENT_SESSION_KEEP = 120
   const sessions = new Map()
+  // S7（2026-08-31 perf-audit）：全局时间线合并排序按版本缓存——面板 3s 轮询每次全量 concat+sort（≤24×800 条）纯重复计算
+  let timelineRev = 0
+  let timelineCache = null
   /** ⑫ 每会话最新一帧盲写请求结构投影（phase:'context'）：sid → { ts, frame, souls }；插入序即最旧序，超额淘汰 */
   const contextFrames = new Map()
   function sessionOf(sid, touch = true) {
@@ -322,7 +325,7 @@ export function apply(ctx, config = {}) {
       if (sessions.size > SESSIONS_KEEP) {
         let oldest = null
         for (const x of sessions.values()) if (!oldest || x.lastAt < oldest.lastAt) oldest = x
-        if (oldest) sessions.delete(oldest.id)
+        if (oldest) { sessions.delete(oldest.id); timelineRev++ }
       }
     }
     if (touch) b.lastAt = Date.now()
@@ -336,13 +339,17 @@ export function apply(ctx, config = {}) {
     const b = sessionOf(sid)
     b.timeline.push({ ...entry, sid: b.id })
     if (b.timeline.length > TIMELINE_KEEP) b.timeline.splice(0, b.timeline.length - TIMELINE_KEEP)
+    timelineRev++
   }
-  /** 全局时间线：各会话合并按 ts 升序，取最新 TIMELINE_KEEP 条 */
+  /** 全局时间线：各会话合并按 ts 升序，取最新 TIMELINE_KEEP 条；S7：无新条目时直接回缓存（内容逐字节一致） */
   function mergedTimeline() {
+    if (timelineCache && timelineCache.rev === timelineRev) return timelineCache.list
     const all = []
     for (const b of sessions.values()) all.push(...b.timeline)
     all.sort((a, b) => a.ts - b.ts)
-    return all.length > TIMELINE_KEEP ? all.slice(all.length - TIMELINE_KEEP) : all
+    const list = all.length > TIMELINE_KEEP ? all.slice(all.length - TIMELINE_KEEP) : all
+    timelineCache = { rev: timelineRev, list }
+    return list
   }
   // ---------- 2.5 评测指标（架构图 D）：进程生命周期内存累计，GET /trisoul/api/state → metrics ----------
   // 结构约定：率只存原始分子/分母计数（UI 算百分比）；均值项统一 { sum, count }（count=样本数）。
@@ -382,6 +389,8 @@ export function apply(ctx, config = {}) {
       },
       // v2 独走步：单发胜者魂吸收挂账 tips（无盲写无表决）；失败 → 丢弃 tips 回退共识
       solo: { runs: 0, failed: 0 },
+      // S8（2026-08-31 perf-audit）todo 闸门可观测：独走/复核是全尺寸盲写调用，此前藏在轮总时长里（真机 t53 黑箱 4 分钟）
+      gate: { bounces: 0, reviews: 0, durMs: { sum: 0, count: 0 } },
       // divergence 位（2026-08-28 表决重设计，接替 salvage：票面恒带 divergence 键）：非空率 = withFork/ballots = 知情票率
       divergence: {
         ballots: 0,             // 带 divergence 位的选票总数（分母）
@@ -542,10 +551,14 @@ export function apply(ctx, config = {}) {
         // 评测：共识两 stage 按档位分桶（off vs 思考档位效率对比、表决 off 采用率）
         if (who.stage === 'draft' || who.stage === 'vote') {
           const key = `${who.stage}/${options.reasoningEffort ?? 'default'}`
-          const bucket = metrics.reasoning.efforts[key] ?? (metrics.reasoning.efforts[key] = { count: 0, durationMs: 0, reasoningTokens: 0 })
+          const bucket = metrics.reasoning.efforts[key] ?? (metrics.reasoning.efforts[key] = { count: 0, durationMs: 0, reasoningTokens: 0, inputTokens: 0, cacheReadTokens: 0 })
           bucket.count++
           if (typeof s.lastDurationMs === 'number') bucket.durationMs += s.lastDurationMs
           bucket.reasoningTokens += usage?.reasoningTokens ?? 0
+          // C1（2026-08-31 perf-audit）：分 stage 缓存账——命中率 = cacheReadTokens/(cacheReadTokens+inputTokens)；
+          // totals/每魂 stats 已有整体账，这里补 draft/vote 拆分（缓存优化的验收分母）
+          bucket.inputTokens += usage?.inputTokens ?? 0
+          bucket.cacheReadTokens += usage?.cacheReadTokens ?? 0
         }
         pushRecent({ ts: started, id: who.id, stage: who.stage, provider: options.provider, model: options.model,
           effort: options.reasoningEffort ?? null,
@@ -752,6 +765,25 @@ export function apply(ctx, config = {}) {
       }
       return
     }
+    if (info.phase === 'gate') {
+      // S8：kind unresolved=闸门弹回独走 / text-review=文字复核；done:true = 该次独走/复核调用收尾（带耗时）
+      if (info.done === true) {
+        addSample(metrics.consensus.gate.durMs, info.durationMs)
+        pushTimeline(info.sessionId, { ts: info.ts ?? Date.now(), durationMs: info.durationMs ?? null, id: 'main', stage: 'gate', ok: !info.error,
+          turnId: r?.turnId ?? info.turnId ?? null, ...(info.error ? { error: String(info.error).slice(0, 200) } : {}),
+          note: info.mode === 'round' ? `todo 弹回全员轮（第 ${info.bounce ?? '?'} 次${info.winner ? `，胜 ${soulName(info.winner)}` : ''}）` : `todo ${info.kind === 'text-review' ? '复核' : '独走'}（灵魂 ${soulName(info.solo ?? info.soul) ?? '?'}，第 ${info.bounce ?? '?'} 次）` })
+      } else if (info.kind === 'text-review') metrics.consensus.gate.reviews++
+      else metrics.consensus.gate.bounces++
+      if (r) {
+        if (!Array.isArray(r.gates)) r.gates = []
+        r.gates.push({ ts: info.ts ?? Date.now(), kind: info.kind ?? null, bounce: info.bounce ?? null, soul: soulName(info.solo ?? info.soul), done: info.done === true, ...(info.mode === 'round' ? { mode: 'round' } : {}), ...(info.winner ? { winner: soulName(info.winner) } : {}),
+          ...(typeof info.durationMs === 'number' ? { durationMs: info.durationMs } : {}), ...(info.error ? { error: String(info.error).slice(0, 200) } : {}),
+          ...(typeof info.undone === 'number' ? { undone: info.undone } : {}), ...(typeof info.unqualified === 'number' ? { unqualified: info.unqualified } : {}),
+          ...(typeof info.textOnly === 'number' ? { textOnly: info.textOnly } : {}) })
+        if (r.gates.length > 50) r.gates.shift()
+      }
+      return
+    }
     if (info.phase === 'draft') {
       // 评测：盲写超时/失联计数 + 成功稿思考字符（与轮次缓冲无关，r 缺失也照记）
       const rawDrafts = Array.isArray(info.drafts) ? info.drafts : (info.soul !== undefined || info.draft) ? [info.draft ?? info] : []
@@ -799,6 +831,7 @@ export function apply(ctx, config = {}) {
         // 全员弃权（decision:'abstain'）时 counts 全零 tie 也恒 true，混进来会把「平票率」推成假数据
         if (winnerVote && info.tie === true && info.decision !== 'abstain') metrics.consensus.tieBreaks++
       }
+      if (info.gate === true) return   // 2026-08-31 闸门分流：弹回轮表决只计指标，不进轮次缓冲/lastVotes（gate done 事件已带胜者与耗时）
       for (const c of [consensus, sessionOf(r?.sessionId ?? info.sessionId).consensus]) c.lastVotes = { round: info.round, total: info.total, decision: info.decision ?? null, winner: soulName(info.winner) ?? null }
       if (!r) return
       const votes = Array.isArray(info.votes) ? info.votes.map(v => ({
@@ -1076,11 +1109,12 @@ export function apply(ctx, config = {}) {
     inflight: b.rounds.some(r => r.inflight), lastPrompt: (() => { const r = b.rounds[0]; return r && typeof r.prompt === 'string' ? summarize(r.prompt) : null })() })
   const state = async (sessionId) => {
     const b = sessionId ? peekSession(sessionId) : null
+    const resolved = resolveSouls() ?? []   // S7：同一请求只解析一次（snapshotConfig 复用同一份）
     return {
       ts: Date.now(),
-      config: snapshotConfig(),
+      config: snapshotConfig(resolved),
       // 已解析的启用灵魂（顺序=名册顺序）：监控卡片按此生成；persona 只给摘要（全文在 config.souls）
-      souls: (resolveSouls() ?? []).map(s => ({ ...s, ...(s.persona ? { persona: summarize(s.persona) } : {}) })),
+      souls: resolved.map(s => ({ ...s, ...(s.persona ? { persona: summarize(s.persona) } : {}) })),
       ai: aiMeta(),
       // 会话作用域：?sessionId= 时组件状态（stats / 共识摘要）、轮次、时间线、最近调用只给该会话；否则全局累计
       stats: b ? sessionStats(b) : stats,

@@ -105,6 +105,12 @@ const DEFAULT_SOUL_IDLE_TIMEOUT_MS = 60_000
 /** 思考熔断阈值（字符，0 = 关）。默认 20 万字 ≈ 真机失控病例（100 万字/24 分钟）的 1/5、正常思考链的几十倍——
  *  只拦失控不误伤深思考。上限类默认不设限是本仓纪律，此条是 2026-08-26 用户显式拍板的例外。 */
 const DEFAULT_REASONING_FUSE_CHARS = 200_000
+/** 正文退化熔断阈值（字符，0 = 关）：连续「退化尾巴」长度——**不是正文总长上限**（2026-08-31 用户拍板明令）。
+ *  退化 = 滚动窗（8K，即检测下限）内全空白（非空白 ≤2%）或短片段循环（弱周期 ≤256 字）。真机病例（08-30 turn35）：
+ *  B 思考正常收尾后正文退化成纯空白无限流，13 分钟 20 万字——json_schema 锁内语法合法不拦、字节一直流 idle
+ *  不触发、思考熔断只管 reasoning。默认 5 万 ≈ 病例 1/4、几分钟即止损；正常正文（含代码/长表）不存在连续
+ *  5 万字纯空白或逐字循环。上限类默认不设限是本仓纪律，此条与思考熔断同为用户显式拍板的例外。 */
+const DEFAULT_TEXT_FUSE_CHARS = 50_000
 const DEFAULT_SOUL_TIMEOUT_MS = 900_000
 /** 小作业（vote）默认档位：'off'（能力门控后请求 0 思考）或 'inherit'（继承主请求） */
 const DEFAULT_SMALL_JOB_EFFORT = 'off'
@@ -830,6 +836,14 @@ class SoulFuseError extends Error {
     this.code = 'REASONING_FUSE'
   }
 }
+/** 正文退化熔断（2026-08-31 用户令）：正文/工具参数流退化成纯空白或同片段循环——同思考熔断款式：
+ *  超阈值即掐流判失联、不重试（退化是模型×任务性质，重试大概率原样复发）。 */
+class SoulTextDegenError extends Error {
+  constructor(run, limit, kind) {
+    super(`正文退化熔断（尾部连续 ${run} 字${kind === 'ws' ? '全空白' : '同片段循环'} > 上限 ${limit}）`)
+    this.code = 'TEXT_DEGEN_FUSE'
+  }
+}
 /** 流以 finish{kind:'error'|'aborted'} 收尾（适配器/提供方失败）：带上 failure.code 供重试判定 */
 class SoulStreamError extends Error {
   constructor(kind, failure, raw) {
@@ -856,7 +870,7 @@ const NON_RETRY_MSG = /\b(400|401|403|404|413|422)\b|invalid[_ ]api[_ ]key|unaut
 function retryable(e, upstreamSignal) {
   if (upstreamSignal?.aborted) return false
   if (e?.code === 'TIMEOUT') return e.kind === 'idle'
-  if (e?.code === 'REASONING_FUSE') return false
+  if (e?.code === 'REASONING_FUSE' || e?.code === 'TEXT_DEGEN_FUSE') return false
   if (e?.code === 'EMPTY' || e?.code === 'INVALID_OUTPUT') return true
   const code = e?.code ?? e?.failure?.code
   if (typeof code === 'string' && NON_RETRY_CODE.test(code)) return false
@@ -877,7 +891,7 @@ const sleep = (ms, signal) => new Promise((res) => {
  * 成功返回 collect 结果 + { attempts, retries:[{attempt,error,delayMs}] }；最终失败抛最后一个错误并挂上 .attempts/.retries。
  * onRetry({attempt,error,delayMs,next}) 在每次决定重试时同步回调（监控事件用）。
  */
-async function callSoul(ctx, makeOpts, { timeoutMs, idleTimeoutMs, reasoningFuseChars, onDelta } = {}, { retries = 0, backoffMs = 0, validate, onRetry } = {}) {
+async function callSoul(ctx, makeOpts, { timeoutMs, idleTimeoutMs, reasoningFuseChars, textFuseChars, onDelta } = {}, { retries = 0, backoffMs = 0, validate, onRetry } = {}) {
   const t0 = Date.now()
   const history = []
   for (let attempt = 1; ; attempt++) {
@@ -887,7 +901,7 @@ async function callSoul(ctx, makeOpts, { timeoutMs, idleTimeoutMs, reasoningFuse
     if (timeoutMs > 0 && remaining <= 0) err = new SoulTimeoutError(timeoutMs, 'hard')
     else {
       try {
-        const d = await collect(ctx, opts, { timeoutMs: remaining, idleTimeoutMs, reasoningFuseChars, onDelta: onDelta ? (s) => onDelta({ ...s, attempt }) : undefined })
+        const d = await collect(ctx, opts, { timeoutMs: remaining, idleTimeoutMs, reasoningFuseChars, textFuseChars, onDelta: onDelta ? (s) => onDelta({ ...s, attempt }) : undefined })
         const bad = (!d.text.trim() && d.toolCalls === 0) ? new SoulEmptyError() : validate?.(d)
         if (!bad) return { ...d, opts, attempts: attempt, retries: history }
         err = typeof bad === 'string' ? new SoulInvalidOutputError(bad, d) : bad
@@ -921,13 +935,41 @@ const liveGate = (fire, intervalMs = 250) => {
   return (snap) => { const now = Date.now(); if (now - last >= intervalMs) { last = now; fire(snap) } }
 }
 
+/** 正文退化量规：滚动窗每攒 2K 字检一次，窗内全空白或弱周期循环（KMP border ≥ len−256 ⇔ 存在周期 ≤256）
+ *  判退化；连续退化尾巴累计（窗本身记入）超限即报。检测下限 = 窗口 8K——阈值再小也要先攒满一窗。 */
+const DEGEN_WINDOW = 8192, DEGEN_STEP = 2048, DEGEN_PERIOD = 256
+function mkDegenGauge(limit) {
+  let tail = '', pending = 0, run = 0
+  return (delta) => {
+    if (!(limit > 0) || !delta) return null
+    tail = (tail + delta).slice(-DEGEN_WINDOW)
+    pending += delta.length
+    if (pending < DEGEN_STEP || tail.length < DEGEN_WINDOW) return null
+    const step = pending
+    pending = 0
+    const kind = degenKind(tail)
+    run = kind ? run + step : 0
+    return kind && run + DEGEN_WINDOW > limit ? { run: run + DEGEN_WINDOW, limit, kind } : null
+  }
+}
+function degenKind(w) {
+  if (w.replace(/\s+/g, '').length <= w.length * 0.02) return 'ws'
+  const f = new Int32Array(w.length)
+  for (let i = 1, k = 0; i < w.length; i++) {
+    while (k > 0 && w[i] !== w[k]) k = f[k - 1]
+    if (w[i] === w[k]) k++
+    f[i] = k
+  }
+  return w.length - f[w.length - 1] <= DEGEN_PERIOD ? 'loop' : null
+}
+
 /**
  * 把一次 llm.stream 完整收集成块流 + 文本 + 思考 + 统计。
  * 同步 throw（如参数校验）与终止 finish{kind:'error'|'aborted'} 统一转成 rejection，调用方 catch 一处兜住。
  * timeoutMs > 0 时：定时器 + 上游 options.signal 任一触发即 abort（合并进 options.signal），
  * 并对 iterator.next() 做 race，适配器无视 signal（Ark 挂起流）也能按时抛出 SoulTimeoutError（code 'TIMEOUT'）。
  */
-async function collect(ctx, options, { timeoutMs, idleTimeoutMs, reasoningFuseChars, onDelta } = {}) {
+async function collect(ctx, options, { timeoutMs, idleTimeoutMs, reasoningFuseChars, textFuseChars, onDelta } = {}) {
   const startedAt = Date.now()
   const ac = new AbortController()
   const upstream = options.signal
@@ -961,6 +1003,8 @@ async function collect(ctx, options, { timeoutMs, idleTimeoutMs, reasoningFuseCh
   const liveArgsBy = new Map()
   let liveArgsIdx = null
   const liveArgs = () => (liveArgsIdx !== null ? liveArgsBy.get(liveArgsIdx) ?? '' : '')
+  const degen = mkDegenGauge(textFuseChars)
+  const feedDegen = (delta) => { const dg = degen(delta); if (dg) throw new SoulTextDegenError(dg.run, dg.limit, dg.kind) }
   let it, finished = false
   try {
     // 同步 throw（参数校验/适配器缺席）也走 finally 清定时器，并作为 rejection 交给调用方
@@ -972,7 +1016,7 @@ async function collect(ctx, options, { timeoutMs, idleTimeoutMs, reasoningFuseCh
       const c = r.value
       armIdle()
       chunks.push(c)
-      if (c.type === 'text-delta') { text += c.text ?? ''; onDelta?.(liveSnap(text + liveArgs(), reasoning)) }
+      if (c.type === 'text-delta') { text += c.text ?? ''; feedDegen(c.text ?? ''); onDelta?.(liveSnap(text + liveArgs(), reasoning)) }
       else if (c.type === 'reasoning-delta') {
         reasoning += c.text ?? ''
         if (reasoningFuseChars > 0 && reasoning.length > reasoningFuseChars) throw new SoulFuseError(reasoning.length, reasoningFuseChars)
@@ -981,6 +1025,7 @@ async function collect(ctx, options, { timeoutMs, idleTimeoutMs, reasoningFuseCh
       else if (c.type === 'tool-call-delta') {
         liveArgsBy.set(c.index, (liveArgsBy.get(c.index) ?? '') + (c.argumentsDelta ?? ''))
         liveArgsIdx = c.index
+        feedDegen(c.argumentsDelta ?? '')
         onDelta?.(liveSnap(text + liveArgs(), reasoning))
       }
       else if (c.type === 'block-start' && c.blockType === 'tool-call') toolCalls++
@@ -1128,6 +1173,7 @@ function liveConsensusConfig(ctx, config) {
     soulTimeoutMs: pick('soulTimeoutMs', nonNegInt) ?? DEFAULT_SOUL_TIMEOUT_MS,
     soulIdleTimeoutMs: pick('soulIdleTimeoutMs', posInt) ?? DEFAULT_SOUL_IDLE_TIMEOUT_MS,
     reasoningFuseChars: pick('reasoningFuseChars', nonNegInt) ?? DEFAULT_REASONING_FUSE_CHARS,
+    textFuseChars: pick('textFuseChars', nonNegInt) ?? DEFAULT_TEXT_FUSE_CHARS,
     soulRetries: pick('soulRetries', nonNegInt) ?? DEFAULT_SOUL_RETRIES,
     soulRetryBackoffMs: pick('soulRetryBackoffMs', nonNegInt) ?? DEFAULT_SOUL_RETRY_BACKOFF_MS,
     soulStaggerMs: pick('soulStaggerMs', nonNegInt) ?? DEFAULT_SOUL_STAGGER_MS,
@@ -1551,9 +1597,12 @@ async function* consensusBody(ctx, options, staticSouls, config, report, started
   // 每轮开始时快照一次实时配置（模式切换/改模型/增删灵魂即刻对下一轮生效；轮内保持一致）
   const souls = resolveSouls(ctx, staticSouls, options, apiOf)
   const cfg = liveConsensusConfig(ctx, config)
-  const timeout = { timeoutMs: cfg.soulTimeoutMs, idleTimeoutMs: cfg.soulIdleTimeoutMs, reasoningFuseChars: cfg.reasoningFuseChars }
+  const timeout = { timeoutMs: cfg.soulTimeoutMs, idleTimeoutMs: cfg.soulIdleTimeoutMs, reasoningFuseChars: cfg.reasoningFuseChars, textFuseChars: cfg.textFuseChars }
   // 小作业档位：'off' 模式下按该灵魂的路由做能力门控（声明了 off 档才传，否则 undefined = 提供商默认）
   const jobEffort = (soul, mode) => mode === 'off' ? smallJobEffort(ctx, soul.provider, soul.model) : Promise.resolve(undefined)
+  // 结构化选票开关：表决用 cast_ballot 工具；关掉则退回纯文本 JSON。声明必须在 voteAmong 外且先于一切
+  // releaseGated 调用点执行——补比 forkAgainstWinner（voteAmong 外）也引用它（2026-08-31 抽取时的 D2 回归教训）
+  const useTool = cfg.ballotTool !== false
   // 递增 block index：本流内所有块（旁白 + 重放胜者块）共用一个计数器
   let nextIndex = 0
   const text = function* (s) {
@@ -2189,10 +2238,11 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
     yield* replay(kept, { stripReplay: true, dropReasoning: true })
   }
   /**
-   * M5 收官闸门 + C 独走（蓝图 docs/todolist-tools-spec.md）：零条目提交（无真工具调用 = 本步收官）放行前查
-   * todo list——全部任务 勾✓ 且 有合格验证链接 才放行；任一不满足 → I3 旁白 + 实证官单发独走（I4 = 请求尾
-   * user 直令，只列真挡路的任务），独走稿顶替原稿再判。循环无守卫（同状态重复触发 = 有意，用户裁定独走就是
-   * 激活主循环）：独走稿带动作 → 放行、主循环继续；仍零条目且仍不绿 → 再独走，直到全绿或 C 失联/缺席。
+   * M5 收官闸门（蓝图 docs/todolist-tools-spec.md；2026-08-31 分流改制）：零条目提交（无真工具调用 = 本步收官）
+   * 放行前查 todo list——全部任务 勾✓ 且 有合格验证链接 才放行。分流：未完成任务（undone>0）→ 弹回全员新一轮
+   *（三魂盲写+表决，I4 全员版 = 纯事实清单；A 在场可当场删/改写做不成的任务——面板工具不看胜负，死环有结构出口，
+   * 不依赖 C 在编）；全勾完但验证不合格 → 实证官单发独走（I4 独走版，尾句给补证/取消勾两条出路），稿顶替原稿再判。
+   * 循环无守卫（同状态重复触发 = 有意）：稿带动作 → 放行、主循环继续；仍零条目且仍不绿 → 再弹，直到全绿或全灭/C 失联。
    * 空清单真空放行（M6）；无会话/内层关闭 = 闸门不在场。
    * 08-29(3) 加两道：I6 文字复核（全绿后对没问过的 text 链接再独走一次）、I7 放行旁白（分型计数，给用户看）。
    */
@@ -2205,16 +2255,52 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
       const g = todoStore.gateState(session)
       const empiric = souls.find(s => s.officer === 'empiric')
       if (!g.pass) {
+        // 2026-08-31 分流（用户拍板）：未完成 = 活没干完，干活是三魂本职 → 全员新一轮（A 在场，task_map 面板
+        // 盲写当场执行不看胜负，可删/改写做不成的任务——死环结构出口）；全勾完但证据不合格才轮到 C 独走。
+        if (g.undone > 0) {
+          bounces++
+          yield* note(`[todo list] 尚有任务未解决：未完成 ${g.undone} · 无合格验证 ${g.unqualified} —— 弹回全员新一轮\n`)
+          report({ phase: 'gate', kind: 'unresolved', mode: 'round', bounce: bounces, undone: g.undone, unqualified: g.unqualified, total: g.total, souls: souls.map(s => s.name) })
+          const roundT0 = Date.now()
+          const rd = await gather(souls, 'draft', 'todo 弹回 ', s =>
+            soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: mkMsg(`todo-round-${bounces}`, todoStore.unresolvedText(session)) }, cfg))
+          const ra = rd.filter(x => !x.error && !x.truncated)
+          yield* narrateRetried(rd, 'todo 弹回 ')
+          yield* narrateMended(rd, 'todo 弹回 ')
+          yield* narrateDead(rd.filter(x => x.error), 'todo 弹回 ')
+          for (const x of rd.filter(y => !y.error && y.truncated)) yield* note(`[出局] 灵魂 ${x.soul.name} 输出被上限截断，稿不完整，不参选\n`)
+          if (!ra.length) {
+            report({ phase: 'gate', kind: 'unresolved', mode: 'round', done: true, bounce: bounces, durationMs: Date.now() - roundT0, error: 'all-dead' })
+            yield* note('[警告] todo 弹回轮全灭 → 放行原稿\n')
+            break
+          }
+          let rw
+          if (ra.length === 1) {
+            rw = ra[0]
+            yield* note(`[todo list] 仅灵魂 ${rw.soul.name} 存活，直取其稿\n`)
+            yield* narrateDrafts([rw], 'todo 弹回稿')
+          } else {
+            yield* narrateDrafts(ra, 'todo 弹回稿', { pending: true })
+            rw = (yield* voteAmong(ra, 1, { gate: true })).chosen
+          }
+          report({ phase: 'gate', kind: 'unresolved', mode: 'round', done: true, bounce: bounces, winner: rw.soul.name, durationMs: Date.now() - roundT0 })
+          d = rw
+          doneInfo = { ...doneInfo, todoGate: bounces }
+          continue
+        }
         if (!empiric) {
           yield* note(`[todo list] 尚有任务未解决：未完成 ${g.undone} · 无合格验证 ${g.unqualified} —— 无实证官在编，无法独走，照常放行\n`)
           break
         }
         bounces++
-        // I3 弹回旁白（会话可见）+ 监控事件；I4 只随独走请求注入（阅后即焚，不进会话历史）
+        // I3 弹回旁白（会话可见）+ 监控事件；I4 独走版只随独走请求注入（阅后即焚，不进会话历史）
         yield* note(`[todo list] 尚有任务未解决：未完成 ${g.undone} · 无合格验证 ${g.unqualified} —— 转独走处理\n`)
         report({ phase: 'gate', kind: 'unresolved', bounce: bounces, undone: g.undone, unqualified: g.unqualified, total: g.total, solo: empiric.name })
+        const gateT0 = Date.now()
         const [cd] = await gather([empiric], 'draft', 'todo 独走 ', s =>
-          soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: mkMsg(`todo-solo-${bounces}`, todoStore.unresolvedText(session)) }, cfg))
+          soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: mkMsg(`todo-solo-${bounces}`, todoStore.unqualifiedText(session)) }, cfg))
+        // S8（2026-08-31 perf-audit）：独走是全尺寸盲写调用，收尾补发 done 事件带耗时（监控/metrics 可见，治 t53 黑箱段）
+        report({ phase: 'gate', kind: 'unresolved', done: true, bounce: bounces, soul: empiric.name, durationMs: Date.now() - gateT0, ...(cd.error ? { error: cd.error } : {}) })
         if (cd.error) {
           yield* narrateDead([cd], 'todo 独走 ')
           yield* note('[警告] todo 独走失联 → 放行原稿\n')
@@ -2241,8 +2327,11 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
       yield* note(`[todo list] 全部任务已挂证据，其中 ${pending} 条仅凭文字过关 —— 转独走复核\n`)
       report({ phase: 'gate', kind: 'text-review', bounce: reviews, textOnly: pending, total: g.total, solo: empiric.name })
       const reviewText = todoStore.textReviewText(session)
+      const reviewT0 = Date.now()
       const [cd] = await gather([empiric], 'draft', 'todo 复核 ', s =>
         soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: mkMsg(`todo-review-${reviews}`, reviewText) }, cfg))
+      // S8：复核收尾同款 done 事件（带耗时）
+      report({ phase: 'gate', kind: 'text-review', done: true, bounce: reviews, soul: empiric.name, durationMs: Date.now() - reviewT0, ...(cd.error ? { error: cd.error } : {}) })
       if (cd.error) {
         yield* narrateDead([cd], 'todo 复核 ')
         yield* note('[警告] todo 复核失联 → 放行原稿\n')
@@ -2416,128 +2505,133 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
     }
   }
 
-  const n = alive.length
-  const m = n - 1   // 每个投票者看到的候选数 = 别人的稿（不含自己那份：防只投自己，输入也更短）
-  // 选票 = 候选两段卡全文（v2 删选票截断：稿子已是蒸馏两段，零截断原样发，物理墙/注水分配不复存在）。
-  // 票面附投票人自己的稿（标注不可投）——只用于发现分叉（divergence = tips 闸门 + 平票破平的知情票判据）
-  const ballotFor = (perm, selfIdx) => ({
-    text: perm.map((ci, k) => `[Candidate ${k + 1}]${alive[ci].toolCalls ? ` (with ${alive[ci].toolCalls} tool calls)` : ''}\n${fullCard(alive[ci])}`).join('\n\n'),
-    self: fullCard(alive[selfIdx]),
-  })
-  // 结构化选票开关：表决用 cast_ballot 工具；关掉则退回纯文本 JSON
-  const useTool = cfg.ballotTool !== false
-  // 尺②：只问「哪一份可以原样作为这一步的回复直接放行」；风格 / 篇幅 / 整任务未闭环都不是理由。
-  // 尺③（2026-08-22 用户令「不止要输出还要输出好」）：蒸馏封皮含金量计入评判——表决是质量闸门
-  const scaleText =
-    `Judge this step on its own: is the content correct, does it address the request, does it give prose where prose is due and tool calls where action is due.\n` +
-    // B4（2026-08-25）：尺③追加非替换——封皮含金量照旧计入，格名换 findings/plan；
-    // 末句是 plan 的防 Goodhart 边——评委只看 tailWindow(4)+voteEffort off，硬要求「必须有具体 plan」
-    // 会直接教出垫料稿；所以只卡「非空就得具体」，空 plan 一律不降档。
-    `Whether the distilled envelope (findings/plan/action) is factual and grounded counts too: a draft of boilerplate or missing key points ranks below one with a solid envelope. A non-empty plan must be concrete; an empty plan is not a defect — never rank a draft lower for not writing one.\n` +
-    `Never rule out a candidate over style, length, or phrasing; never rule it out because the whole task isn't finished — in a multi-step task, this step only needs to be a correct step.\n`
-  // T4：表决全程无流式输出（三魂各自私下投票），是「慢与死不可分辨」的头号现场 → 心跳伴随
-  const stopVoteBeat = heartbeat('vote', { souls: n })
-  const votes = await Promise.all(alive.map(async (d, vi) => {
-    const others = alive.map((_, i) => i).filter(i => i !== vi)
-    const perm = shuffleFor(d.soul.name, turn, m).map(k => others[k])
-    const base = { soul: d.soul.name, perm, order: perm.map(i => alive[i].soul.name) }
-    const voteEffort = await jobEffort(d.soul, cfg.voteEffort)
-    const ballot = ballotFor(perm, vi)
-    // 结构化选票：给灵魂 cast_ballot 一个工具，从工具调用参数取票（via 'tool'）；没调工具就退回正文解析（via 'text'）
-    const readBallot = (v) => {
-      const call = toolCallsOf(v.chunks).filter(c => c.name === BALLOT_TOOL).at(-1)
-      return call ? { ...parseBallotArgs(call.arguments, { m, perm }), via: 'tool', toolArgs: call.arguments }
-        : { ...parseBallot(v.text, { m, perm }), via: 'text' }
+  const { votes, tally, chosen, voteStr } = yield* voteAmong(alive, round)
+  /** 表决全流程（选票→计票→胜者→旁白）。2026-08-31 闸门分流抽取：函数声明提升，releaseGated（文本序在前）的
+   *  todo 弹回全员轮可复用；gate:true 给 vote 事件带 gate 标记（监控只计指标、不进轮次缓冲/lastVotes）。
+   *  主路径经上面一行 yield* 委托调用，行为与抽取前逐字节一致。 */
+  async function* voteAmong(alive, round, { gate = false } = {}) {
+    const n = alive.length
+    const m = n - 1   // 每个投票者看到的候选数 = 别人的稿（不含自己那份：防只投自己，输入也更短）
+    // 选票 = 候选两段卡全文（v2 删选票截断：稿子已是蒸馏两段，零截断原样发，物理墙/注水分配不复存在）。
+    // 票面附投票人自己的稿（标注不可投）——只用于发现分叉（divergence = tips 闸门 + 平票破平的知情票判据）
+    const ballotFor = (perm, selfIdx) => ({
+      text: perm.map((ci, k) => `[Candidate ${k + 1}]${alive[ci].toolCalls ? ` (with ${alive[ci].toolCalls} tool calls)` : ''}\n${fullCard(alive[ci])}`).join('\n\n'),
+      self: fullCard(alive[selfIdx]),
+    })
+    // 尺②：只问「哪一份可以原样作为这一步的回复直接放行」；风格 / 篇幅 / 整任务未闭环都不是理由。
+    // 尺③（2026-08-22 用户令「不止要输出还要输出好」）：蒸馏封皮含金量计入评判——表决是质量闸门
+    const scaleText =
+      `Judge this step on its own: is the content correct, does it address the request, does it give prose where prose is due and tool calls where action is due.\n` +
+      // B4（2026-08-25）：尺③追加非替换——封皮含金量照旧计入，格名换 findings/plan；
+      // 末句是 plan 的防 Goodhart 边——评委只看 tailWindow(4)+voteEffort off，硬要求「必须有具体 plan」
+      // 会直接教出垫料稿；所以只卡「非空就得具体」，空 plan 一律不降档。
+      `Whether the distilled envelope (findings/plan/action) is factual and grounded counts too: a draft of boilerplate or missing key points ranks below one with a solid envelope. A non-empty plan must be concrete; an empty plan is not a defect — never rank a draft lower for not writing one.\n` +
+      `Never rule out a candidate over style, length, or phrasing; never rule it out because the whole task isn't finished — in a multi-step task, this step only needs to be a correct step.\n`
+    // T4：表决全程无流式输出（三魂各自私下投票），是「慢与死不可分辨」的头号现场 → 心跳伴随
+    const stopVoteBeat = heartbeat('vote', { souls: n })
+    const votes = await Promise.all(alive.map(async (d, vi) => {
+      const others = alive.map((_, i) => i).filter(i => i !== vi)
+      const perm = shuffleFor(d.soul.name, turn, m).map(k => others[k])
+      const base = { soul: d.soul.name, perm, order: perm.map(i => alive[i].soul.name) }
+      const voteEffort = await jobEffort(d.soul, cfg.voteEffort)
+      const ballot = ballotFor(perm, vi)
+      // 结构化选票：给灵魂 cast_ballot 一个工具，从工具调用参数取票（via 'tool'）；没调工具就退回正文解析（via 'text'）
+      const readBallot = (v) => {
+        const call = toolCallsOf(v.chunks).filter(c => c.name === BALLOT_TOOL).at(-1)
+        return call ? { ...parseBallotArgs(call.arguments, { m, perm }), via: 'tool', toolArgs: call.arguments }
+          : { ...parseBallot(v.text, { m, perm }), via: 'text' }
+      }
+      // 选票不合要求（工具参数坏 / 无 JSON / 被输出上限截断）也重试：第 k 次尝试 maxTokens 放大 k 倍（推理模型思考吃预算）
+      // ⑥ 半截票不算票（08-30 用户拍板；0829 批 pest 病例：5 张截断票靠正则从半截正文抠出 pick、2 张改了胜负）：
+      //   截断一律判未解析 → 重试；用尽仍截断 = 弃权。正则兜底只服务没截断的文本票。
+      const validate = (v) => {
+        const b = readBallot(v)
+        return (b.parsed && !v.truncated) ? undefined : `选票${v.truncated ? '被输出上限截断' : b.via === 'tool' ? '工具参数不合法' : '不含可解析 JSON'}`
+      }
+      const submit = useTool
+        ? `Submit via the ${BALLOT_TOOL} tool (${m === 1 ? 'pick=1 to release, pick=0 to withhold' : 'pick is the candidate number, digits only'}; divergence as described above — empty string if none); do not write the ballot in prose. Only if you cannot call the tool, fall back to printing JSON only: {"pick": ${m === 1 ? 1 : 2}, "divergence": ""}`
+        : `Print JSON only: {"pick": ${m === 1 ? '1 or 0' : '<candidate number>'}, "divergence": "as described above, empty string if none"} (pick is a bare number — not "candidate 2")`
+      return callSoul(ctx, (attempt) => soulOptions(options, d.soul, 'vote', {
+        tools: useTool ? [ballotToolSchema(m)] : undefined,
+        maxTokens: cfg.voteMaxTokens > 0 ? cfg.voteMaxTokens * attempt : undefined,
+        reasoningEffort: voteEffort,
+        messages: tailWindow(options.messages, 4),
+        instruction: mkMsg(`v${round}-${d.soul.name}`,
+          (m === 1
+            ? `Below is another candidate response to the same request (the only one; your own draft is not among them).\n${ballot.text}\n\n`
+            : `Below are ${m} candidate responses to the same request.\n${ballot.text}\n\n`) +
+          // 自稿对照区（2026-08-28 表决重设计）：附自己稿只为发现分叉——护栏照旧（不可投、不作评判基准），
+          // 用途从「找互补写 salvage」换成「找实质分叉写 divergence」；空 = 干净背书
+          `[Your own draft — for comparison only, not votable]\n${ballot.self}\n` +
+          `The draft above is your own: it is not among the candidates, you cannot vote for it, and don't use it as the yardstick to pick faults in the candidates. It has exactly one use — spotting forks: if your draft made a genuinely different call from the candidate you pick (one that would change behavior or output), record it in the ballot's divergence field as ${m === 1 ? "'mine does X; this one does Y'" : "'mine does X; the one I picked does Y'"}; otherwise leave divergence empty.\n\n` +
+          (m === 1
+            ? `Answer one question only: can it ship as-is as the reply for this step?\n`
+            : `Answer one question only: which one can ship as-is as the reply for this step? Choose exactly 1.\n`) +
+          scaleText +
+          (m === 1 ? '' : `If every candidate has problems, pick the one with the smallest ones.\n`) +
+          submit),
+      }, cfg), timeout, retryOpts('vote', d.soul, { validate }))
+        .then(v => ({ ...base, ...readBallot(v), reasoning: v.reasoning, attempts: v.attempts }))
+        .catch(e => {
+          // 重试用尽仍拿不到合格选票：弃权（via 'none'）；raw = 最后一次原始输出摘录（监控排查到底输出了什么）
+          const partial = e?.partial ? readBallot(e.partial) : null
+          const tries = e?.attempts > 1 ? `，已重试 ${e.attempts - 1} 次` : ''
+          const rawText = partial?.via === 'tool' ? String(partial.toolArgs ?? '') : (e?.partial?.text ?? '')
+          return { ...base, picks: [], labels: [], parsed: false, via: 'none', divergence: '', reasoning: e?.partial?.reasoning ?? '', attempts: e?.attempts ?? 1,
+            raw: rawText.trim() ? rawText.trim() : undefined,
+            reason: `（弃权：${e?.code === 'TIMEOUT' ? `表决${e.message}` : e?.code === 'INVALID_OUTPUT' ? e.message : `表决失败 ${describeErr(e)}`}${tries}）` }
+        })
+    })).finally(stopVoteBeat)
+    const tally = tallyVotes(votes, n, turn)
+    const nameOf = (i) => alive[i].soul.name
+    // 缺陷2（2026-08-24）：「候选N」是投票者私有编号——每张票的候选卡各自乱序，同一个 N 在三张票里指三个不同的魂，
+    // 逐票读必然误导。旁白呈现直写真身（映射本就在 v.perm 手里）；喂投票魂的候选卡照旧匿名乱序，一个字不动。
+    /** 票据 reason 是模型用自己那张票的编号写的 → 按这张票的 perm 还原成真身。
+     *  覆盖单数与枚举式复数（"candidates 1 and 2" 是高频写法，只还原头一个会剩个裸编号，比不还原更误导）、
+     *  大小写、井号、繁体。两条保守边：整段里只要有一个编号指不到人就整段原样不动（映射错比不映射更糟）；
+     *  尾部否定前瞻挡住 "candidate 2.txt"、"候选1.5" 这类根本不是候选编号的数字。 */
+    const CANDIDATE_RE = /(?:候选|候選|candidates?)\s*#?\s*\d+(?:\s*(?:,|、|and|与|和)\s*#?\d+)*(?![\d.\w])/gi
+    const deanonReason = (v, s) => String(s ?? '').replace(CANDIDATE_RE, (m) => {
+      const names = (m.match(/\d+/g) ?? []).map(d => { const i = v.perm[Number(d) - 1]; return i === undefined ? null : nameOf(i) })
+      if (!names.length || names.some(x => x === null)) return m
+      return m.replace(/^(?:候选|候選|candidates?)\s*#?\s*/i, '').replace(/#?\d+/g, () => `灵魂 ${names.shift()}`)
+    })
+    const voteWord = (v) => v.picks.length ? v.picks.map(nameOf).join('+') : v.reject ? '不放行' : '弃权'
+    // 一行票面（2026-08-30 瘦身）：谁投谁 + 结果；分叉全文/文本票标记/投票理由归监控页（vote 事件已带真身）。
+    // 弃权原因剥掉系统套壳只留白话。
+    const abstainWhy = (v) => {
+      if (v.picks.length || v.reject || !v.reason) return ''
+      const m = String(v.reason).match(/^（弃权：?(.*)）$/)
+      return `（${m ? m[1] : v.reason}）`
     }
-    // 选票不合要求（工具参数坏 / 无 JSON / 被输出上限截断）也重试：第 k 次尝试 maxTokens 放大 k 倍（推理模型思考吃预算）
-    // ⑥ 半截票不算票（08-30 用户拍板；0829 批 pest 病例：5 张截断票靠正则从半截正文抠出 pick、2 张改了胜负）：
-    //   截断一律判未解析 → 重试；用尽仍截断 = 弃权。正则兜底只服务没截断的文本票。
-    const validate = (v) => {
-      const b = readBallot(v)
-      return (b.parsed && !v.truncated) ? undefined : `选票${v.truncated ? '被输出上限截断' : b.via === 'tool' ? '工具参数不合法' : '不含可解析 JSON'}`
-    }
-    const submit = useTool
-      ? `Submit via the ${BALLOT_TOOL} tool (${m === 1 ? 'pick=1 to release, pick=0 to withhold' : 'pick is the candidate number, digits only'}; divergence as described above — empty string if none); do not write the ballot in prose. Only if you cannot call the tool, fall back to printing JSON only: {"pick": ${m === 1 ? 1 : 2}, "divergence": ""}`
-      : `Print JSON only: {"pick": ${m === 1 ? '1 or 0' : '<candidate number>'}, "divergence": "as described above, empty string if none"} (pick is a bare number — not "candidate 2")`
-    return callSoul(ctx, (attempt) => soulOptions(options, d.soul, 'vote', {
-      tools: useTool ? [ballotToolSchema(m)] : undefined,
-      maxTokens: cfg.voteMaxTokens > 0 ? cfg.voteMaxTokens * attempt : undefined,
-      reasoningEffort: voteEffort,
-      messages: tailWindow(options.messages, 4),
-      instruction: mkMsg(`v${round}-${d.soul.name}`,
-        (m === 1
-          ? `Below is another candidate response to the same request (the only one; your own draft is not among them).\n${ballot.text}\n\n`
-          : `Below are ${m} candidate responses to the same request.\n${ballot.text}\n\n`) +
-        // 自稿对照区（2026-08-28 表决重设计）：附自己稿只为发现分叉——护栏照旧（不可投、不作评判基准），
-        // 用途从「找互补写 salvage」换成「找实质分叉写 divergence」；空 = 干净背书
-        `[Your own draft — for comparison only, not votable]\n${ballot.self}\n` +
-        `The draft above is your own: it is not among the candidates, you cannot vote for it, and don't use it as the yardstick to pick faults in the candidates. It has exactly one use — spotting forks: if your draft made a genuinely different call from the candidate you pick (one that would change behavior or output), record it in the ballot's divergence field as ${m === 1 ? "'mine does X; this one does Y'" : "'mine does X; the one I picked does Y'"}; otherwise leave divergence empty.\n\n` +
-        (m === 1
-          ? `Answer one question only: can it ship as-is as the reply for this step?\n`
-          : `Answer one question only: which one can ship as-is as the reply for this step? Choose exactly 1.\n`) +
-        scaleText +
-        (m === 1 ? '' : `If every candidate has problems, pick the one with the smallest ones.\n`) +
-        submit),
-    }, cfg), timeout, retryOpts('vote', d.soul, { validate }))
-      .then(v => ({ ...base, ...readBallot(v), reasoning: v.reasoning, attempts: v.attempts }))
-      .catch(e => {
-        // 重试用尽仍拿不到合格选票：弃权（via 'none'）；raw = 最后一次原始输出摘录（监控排查到底输出了什么）
-        const partial = e?.partial ? readBallot(e.partial) : null
-        const tries = e?.attempts > 1 ? `，已重试 ${e.attempts - 1} 次` : ''
-        const rawText = partial?.via === 'tool' ? String(partial.toolArgs ?? '') : (e?.partial?.text ?? '')
-        return { ...base, picks: [], labels: [], parsed: false, via: 'none', divergence: '', reasoning: e?.partial?.reasoning ?? '', attempts: e?.attempts ?? 1,
-          raw: rawText.trim() ? rawText.trim() : undefined,
-          reason: `（弃权：${e?.code === 'TIMEOUT' ? `表决${e.message}` : e?.code === 'INVALID_OUTPUT' ? e.message : `表决失败 ${describeErr(e)}`}${tries}）` }
-      })
-  })).finally(stopVoteBeat)
-  const tally = tallyVotes(votes, n, turn)
-  const nameOf = (i) => alive[i].soul.name
-  // 缺陷2（2026-08-24）：「候选N」是投票者私有编号——每张票的候选卡各自乱序，同一个 N 在三张票里指三个不同的魂，
-  // 逐票读必然误导。旁白呈现直写真身（映射本就在 v.perm 手里）；喂投票魂的候选卡照旧匿名乱序，一个字不动。
-  /** 票据 reason 是模型用自己那张票的编号写的 → 按这张票的 perm 还原成真身。
-   *  覆盖单数与枚举式复数（"candidates 1 and 2" 是高频写法，只还原头一个会剩个裸编号，比不还原更误导）、
-   *  大小写、井号、繁体。两条保守边：整段里只要有一个编号指不到人就整段原样不动（映射错比不映射更糟）；
-   *  尾部否定前瞻挡住 "candidate 2.txt"、"候选1.5" 这类根本不是候选编号的数字。 */
-  const CANDIDATE_RE = /(?:候选|候選|candidates?)\s*#?\s*\d+(?:\s*(?:,|、|and|与|和)\s*#?\d+)*(?![\d.\w])/gi
-  const deanonReason = (v, s) => String(s ?? '').replace(CANDIDATE_RE, (m) => {
-    const names = (m.match(/\d+/g) ?? []).map(d => { const i = v.perm[Number(d) - 1]; return i === undefined ? null : nameOf(i) })
-    if (!names.length || names.some(x => x === null)) return m
-    return m.replace(/^(?:候选|候選|candidates?)\s*#?\s*/i, '').replace(/#?\d+/g, () => `灵魂 ${names.shift()}`)
-  })
-  const voteWord = (v) => v.picks.length ? v.picks.map(nameOf).join('+') : v.reject ? '不放行' : '弃权'
-  // 一行票面（2026-08-30 瘦身）：谁投谁 + 结果；分叉全文/文本票标记/投票理由归监控页（vote 事件已带真身）。
-  // 弃权原因剥掉系统套壳只留白话。
-  const abstainWhy = (v) => {
-    if (v.picks.length || v.reject || !v.reason) return ''
-    const m = String(v.reason).match(/^（弃权：?(.*)）$/)
-    return `（${m ? m[1] : v.reason}）`
+    const seg = (v) => v.picks.length ? `${v.soul}→${v.picks.map(nameOf).join('+')}`
+      : v.reject ? `${v.soul} 不放行` : `${v.soul} 弃权${abstainWhy(v)}`
+    const voteStr = votes.map(v => `${v.soul}→${voteWord(v)}`).join(', ')
+    const chosen = alive[tally.chosenIdx]
+    // 事件：picks 为灵魂名（0/1 个）；tie 只在真的动用了平票破平（平票 / 全员弃权）选出候选时为 true；tieKind 见 tallyVotes
+    report({
+      phase: 'vote', round, ...(gate ? { gate: true } : {}), ballots: 1, total: votes.length, tie: tally.tie, decision: tally.decision, tieKind: tally.tieKind,
+      counts: alive.map((d, i) => ({ soul: d.soul.name, votes: tally.counts[i] })),
+      winner: chosen.soul.name,
+      votes: votes.map(v => ({
+        soul: v.soul, picks: v.picks.map(nameOf), labels: v.labels, parsed: v.parsed, via: v.via, order: v.order, attempts: v.attempts,
+        ...(v.raw ? { raw: v.raw } : {}),
+        best: v.picks.length ? v.picks.map(nameOf).join(' + ') : null, ...(v.reject ? { reject: true } : {}),
+        divergence: deanonReason(v, v.divergence ?? ''),   // 恒带位（空串也带）——监控以「带位票数」为知情率分母；旁白弃显后监控是唯一明细面，编号还原真身
+        reason: deanonReason(v, v.reason), reasoning: v.reasoning,
+      })),
+    })
+    // 胜者放行（平票时 chosenIdx 已是破平结果，v2 无融合轮）：一行结果收口
+    const tail = tally.decision === 'abstain' ? `⇒ 全员弃权，轮换胜 ${chosen.soul.name}`
+      : tally.tie
+        ? (tally.tieKind === 'resolved'
+          ? `⇒ 平票，知情票（${nameOf(tally.resolvedBy)}）定胜 ${chosen.soul.name}`
+          : `⇒ 平票，轮换胜 ${chosen.soul.name}`)
+        : `⇒ 胜 ${chosen.soul.name}`
+    yield* note(`\n表决 ${votes.map(seg).join(' · ')} ${tail}\n`)
+    ctx.logger?.info(`trisoul: 表决 ${voteStr} → 胜者 灵魂${chosen.soul.name}${tally.tie ? `（平票 ${tally.tieKind}）` : ''}`)
+    return { votes, tally, chosen, voteStr }
   }
-  const seg = (v) => v.picks.length ? `${v.soul}→${v.picks.map(nameOf).join('+')}`
-    : v.reject ? `${v.soul} 不放行` : `${v.soul} 弃权${abstainWhy(v)}`
-  const voteStr = votes.map(v => `${v.soul}→${voteWord(v)}`).join(', ')
-  const chosen = alive[tally.chosenIdx]
-  // 事件：picks 为灵魂名（0/1 个）；tie 只在真的动用了平票破平（平票 / 全员弃权）选出候选时为 true；tieKind 见 tallyVotes
-  report({
-    phase: 'vote', round, ballots: 1, total: votes.length, tie: tally.tie, decision: tally.decision, tieKind: tally.tieKind,
-    counts: alive.map((d, i) => ({ soul: d.soul.name, votes: tally.counts[i] })),
-    winner: chosen.soul.name,
-    votes: votes.map(v => ({
-      soul: v.soul, picks: v.picks.map(nameOf), labels: v.labels, parsed: v.parsed, via: v.via, order: v.order, attempts: v.attempts,
-      ...(v.raw ? { raw: v.raw } : {}),
-      best: v.picks.length ? v.picks.map(nameOf).join(' + ') : null, ...(v.reject ? { reject: true } : {}),
-      divergence: deanonReason(v, v.divergence ?? ''),   // 恒带位（空串也带）——监控以「带位票数」为知情率分母；旁白弃显后监控是唯一明细面，编号还原真身
-      reason: deanonReason(v, v.reason), reasoning: v.reasoning,
-    })),
-  })
-  // 胜者放行（平票时 chosenIdx 已是破平结果，v2 无融合轮）：一行结果收口
-  const tail = tally.decision === 'abstain' ? `⇒ 全员弃权，轮换胜 ${chosen.soul.name}`
-    : tally.tie
-      ? (tally.tieKind === 'resolved'
-        ? `⇒ 平票，知情票（${nameOf(tally.resolvedBy)}）定胜 ${chosen.soul.name}`
-        : `⇒ 平票，轮换胜 ${chosen.soul.name}`)
-      : `⇒ 胜 ${chosen.soul.name}`
-  yield* note(`\n表决 ${votes.map(seg).join(' · ')} ${tail}\n`)
-  ctx.logger?.info(`trisoul: 表决 ${voteStr} → 胜者 灵魂${chosen.soul.name}${tally.tie ? `（平票 ${tally.tieKind}）` : ''}`)
 
   // ---- tips 收集（2026-08-28 表决重设计）----
   // 明胜 / resolved：非胜者票的非空 divergence（明胜下两败者必投了胜者 → 分叉天然对准胜稿）；弃权魂的稿恒附。
