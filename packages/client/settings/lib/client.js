@@ -84,10 +84,10 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var Picker_module_css_default = {
-			"triggerEmpty": "PMN_SG_triggerEmpty",
 			"triggerLabel": "PMN_SG_triggerLabel",
+			"caret": "PMN_SG_caret",
 			"trigger": "PMN_SG_trigger",
-			"caret": "PMN_SG_caret"
+			"triggerEmpty": "PMN_SG_triggerEmpty"
 		};
 		//#endregion
 		//#region src/client/Picker.tsx
@@ -181,45 +181,45 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var TrisoulSection_module_css_default = {
-			"table": "zFfKmq_table",
-			"modeRow": "zFfKmq_modeRow",
-			"aiRow": "zFfKmq_aiRow",
-			"aiFieldsWrap": "zFfKmq_aiFieldsWrap",
-			"title": "zFfKmq_title",
-			"modeCard": "zFfKmq_modeCard",
-			"range": "zFfKmq_range",
-			"resolvedRow": "zFfKmq_resolvedRow",
-			"tempValue": "zFfKmq_tempValue",
 			"hint": "zFfKmq_hint",
-			"group": "zFfKmq_group",
-			"modeDesc": "zFfKmq_modeDesc",
+			"intro": "zFfKmq_intro",
 			"inlineLabel": "zFfKmq_inlineLabel",
+			"header": "zFfKmq_header",
+			"modeDesc": "zFfKmq_modeDesc",
+			"aiDot": "zFfKmq_aiDot",
+			"muted": "zFfKmq_muted",
+			"group": "zFfKmq_group",
+			"title": "zFfKmq_title",
+			"range": "zFfKmq_range",
+			"warn": "zFfKmq_warn",
+			"hintInline": "zFfKmq_hintInline",
+			"tempValue": "zFfKmq_tempValue",
 			"statusRow": "zFfKmq_statusRow",
+			"modeCardActive": "zFfKmq_modeCardActive",
+			"modeName": "zFfKmq_modeName",
+			"aiFieldsDimmed": "zFfKmq_aiFieldsDimmed",
+			"table": "zFfKmq_table",
+			"numInput": "zFfKmq_numInput",
+			"modeRow": "zFfKmq_modeRow",
+			"fieldRow": "zFfKmq_fieldRow",
+			"resolvedRow": "zFfKmq_resolvedRow",
+			"resolvedAi": "zFfKmq_resolvedAi",
+			"section": "zFfKmq_section",
+			"error": "zFfKmq_error",
+			"roundsRow": "zFfKmq_roundsRow",
+			"headerActions": "zFfKmq_headerActions",
+			"aiFields": "zFfKmq_aiFields",
+			"actions": "zFfKmq_actions",
+			"groupDimmed": "zFfKmq_groupDimmed",
+			"aiFieldsWrap": "zFfKmq_aiFieldsWrap",
+			"aiRow": "zFfKmq_aiRow",
+			"groupLabel": "zFfKmq_groupLabel",
+			"resolvedList": "zFfKmq_resolvedList",
+			"tempField": "zFfKmq_tempField",
 			"aiName": "zFfKmq_aiName",
 			"fieldLabel": "zFfKmq_fieldLabel",
-			"resolvedAi": "zFfKmq_resolvedAi",
-			"numInput": "zFfKmq_numInput",
-			"roundsRow": "zFfKmq_roundsRow",
-			"warn": "zFfKmq_warn",
-			"modeName": "zFfKmq_modeName",
-			"groupDimmed": "zFfKmq_groupDimmed",
-			"actions": "zFfKmq_actions",
-			"section": "zFfKmq_section",
-			"aiDot": "zFfKmq_aiDot",
 			"ok": "zFfKmq_ok",
-			"resolvedList": "zFfKmq_resolvedList",
-			"error": "zFfKmq_error",
-			"hintInline": "zFfKmq_hintInline",
-			"modeCardActive": "zFfKmq_modeCardActive",
-			"fieldRow": "zFfKmq_fieldRow",
-			"aiFieldsDimmed": "zFfKmq_aiFieldsDimmed",
-			"groupLabel": "zFfKmq_groupLabel",
-			"muted": "zFfKmq_muted",
-			"header": "zFfKmq_header",
-			"headerActions": "zFfKmq_headerActions",
-			"intro": "zFfKmq_intro",
-			"aiFields": "zFfKmq_aiFields",
-			"tempField": "zFfKmq_tempField"
+			"modeCard": "zFfKmq_modeCard"
 		};
 		//#endregion
 		//#region src/client/TrisoulSection.tsx
@@ -366,6 +366,7 @@ window.__ModuleLoader__.load({
 			const trace = config.consensus?.trace ?? "reasoning";
 			const voteEffort = config.consensus?.voteEffort ?? "off";
 			const voteMaxTokens = config.consensus?.voteMaxTokens ?? 0;
+			const voteTailWindow = config.consensus?.voteTailWindow ?? 4;
 			const nearIdentical = config.consensus?.nearIdentical !== false;
 			const nearIdenticalSimilarity = config.consensus?.nearIdenticalSimilarity ?? .7;
 			const soulRetries = config.consensus?.soulRetries ?? 2;
@@ -728,6 +729,53 @@ window.__ModuleLoader__.load({
 									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 										className: TrisoulSection_module_css_default.hint,
 										children: t("consensus.voteMax.hint")
+									})
+								]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: TrisoulSection_module_css_default.fieldRow,
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
+										className: TrisoulSection_module_css_default.fieldLabel,
+										children: t("consensus.voteTail")
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: TrisoulSection_module_css_default.roundsRow,
+										role: "radiogroup",
+										"aria-label": t("consensus.voteTail"),
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Pill, {
+												active: voteTailWindow === 0,
+												onClick: () => {
+													if (voteTailWindow !== 0) save({ consensus: { voteTailWindow: 0 } });
+												},
+												children: t("consensus.voteTail.none")
+											}),
+											[
+												1,
+												2,
+												4,
+												8
+											].map((n) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Pill, {
+												active: voteTailWindow === n,
+												onClick: () => {
+													if (voteTailWindow !== n) save({ consensus: { voteTailWindow: n } });
+												},
+												children: n
+											}, n)),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumField, {
+												label: t("pick.custom"),
+												value: voteTailWindow,
+												min: 0,
+												onCommit: (n) => {
+													save({ consensus: { voteTailWindow: n } });
+												}
+											})
+										]
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: TrisoulSection_module_css_default.hint,
+										children: t("consensus.voteTail.hint")
 									})
 								]
 							}),
@@ -1189,12 +1237,12 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var ModeSwitch_module_css_default = {
-			"sep": "Rljr8q_sep",
-			"pill": "Rljr8q_pill",
-			"model": "Rljr8q_model",
 			"souls": "Rljr8q_souls",
+			"model": "Rljr8q_model",
 			"brand": "Rljr8q_brand",
-			"anchor": "Rljr8q_anchor"
+			"anchor": "Rljr8q_anchor",
+			"pill": "Rljr8q_pill",
+			"sep": "Rljr8q_sep"
 		};
 		//#endregion
 		//#region src/client/ModeSwitch.tsx
@@ -1369,6 +1417,9 @@ window.__ModuleLoader__.load({
 			"consensus.voteMax": "表决选票上限",
 			"consensus.voteMax.unlimited": "不限",
 			"consensus.voteMax.hint": "表决调用的 maxTokens。选票被上限截断时自动放大重试；不限 = 不设上限（默认）",
+			"consensus.voteTail": "表决尾窗",
+			"consensus.voteTail.none": "不带历史",
+			"consensus.voteTail.hint": "评委表决时附带看的对话末尾条数。默认 4；调小省输入，但评委看不到最近的工具结果；不带历史 = 只看候选卡与指令",
 			"consensus.retries": "失败自动重试",
 			"consensus.retries.hint": "灵魂调用失败（断流 / 5xx / 限流 / 无输出超时 / 空响应 / 选票不合格）后再试几次，退避 1s×次数；总时长仍受总上限约束；配置类错误不重试（默认 2，0=关）",
 			"consensus.timeout": "单魂调用总上限",
@@ -1479,6 +1530,9 @@ window.__ModuleLoader__.load({
 			"consensus.voteMax": "Ballot token cap",
 			"consensus.voteMax.unlimited": "unlimited",
 			"consensus.voteMax.hint": "maxTokens for vote calls. A ballot truncated by the cap is automatically retried with a larger one; unlimited = no cap (default)",
+			"consensus.voteTail": "Vote tail window",
+			"consensus.voteTail.none": "no history",
+			"consensus.voteTail.hint": "Trailing conversation messages judges see when voting. Default 4; smaller saves input but judges lose the latest tool results; no history = candidates and instructions only",
 			"consensus.retries": "Auto retry on failure",
 			"consensus.retries.hint": "How many times a failed soul call (stream error / 5xx / rate limit / idle timeout / empty reply / unparseable ballot) is retried, backoff 1s×attempt, within the same overall cap; config errors are not retried (default 2, 0 = off)",
 			"consensus.timeout": "Per-soul hard time limit",

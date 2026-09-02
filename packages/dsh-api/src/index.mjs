@@ -44,6 +44,7 @@ export const REPLAY_REASONS = Object.freeze(['off', 'latest'])
 const ConsensusSchema = Schema.object({
   trace: Schema.union(TRACE_MODES).default('reasoning'),
   voteMaxTokens: Schema.number().min(0).step(1),   // 0 = 不设限（默认）；08-30 撤 max(8000)（用户令 16000 填不进设置页；上限类默认不设限）
+  voteTailWindow: Schema.number().min(0).step(1),  // 表决/补比评委附带的对话尾窗条数（0 = 只看候选卡与指令；插件默认 4）——09-02 io-audit F3 用户令改可调
   soulRetries: Schema.number().min(0).max(5).step(1), // 灵魂调用失败自动重试次数（0=关；插件默认 2）
   soulTimeoutMs: Schema.number().min(0).step(1), // 单魂一次调用（盲写/表决）总时长硬上限 ms（0 = 不限，靠 idle 兜底；插件默认 900000 = 15 分钟）
   soulIdleTimeoutMs: Schema.number().min(1000).step(1), // 连续无流式输出判失联 ms（插件默认 60000；无 0 档——总上限不限时它是防挂死的最后防线）
@@ -257,6 +258,7 @@ export function apply(ctx, config = {}) {
     return {
       trace: c.trace ?? b.trace ?? 'reasoning',
       ...(c.voteMaxTokens ?? b.voteMaxTokens) !== undefined ? { voteMaxTokens: c.voteMaxTokens ?? b.voteMaxTokens } : {},
+      ...(c.voteTailWindow ?? b.voteTailWindow) !== undefined ? { voteTailWindow: c.voteTailWindow ?? b.voteTailWindow } : {},
       ...(c.soulRetries ?? b.soulRetries) !== undefined ? { soulRetries: c.soulRetries ?? b.soulRetries } : {},
       ...(c.soulTimeoutMs ?? b.soulTimeoutMs) !== undefined ? { soulTimeoutMs: c.soulTimeoutMs ?? b.soulTimeoutMs } : {},
       ...(c.soulIdleTimeoutMs ?? b.soulIdleTimeoutMs) !== undefined ? { soulIdleTimeoutMs: c.soulIdleTimeoutMs ?? b.soulIdleTimeoutMs } : {},
@@ -321,7 +323,7 @@ export function apply(ctx, config = {}) {
   ctx.on('trisoul/ai-config', (id) => (
     (HUB_AI_IDS.includes(id) || (typeof id === 'string' && id.startsWith('soul-'))) ? resolveAi(id) : undefined
   ), { global: true })
-  // 共识插件按轮查询：ctx.bail('trisoul/consensus-config') → { trace, voteMaxTokens?, soulRetries?, soulTimeoutMs?, soulIdleTimeoutMs?, innerEvidence?:false, innerRounds?, voteEffort, replayReasoning }
+  // 共识插件按轮查询：ctx.bail('trisoul/consensus-config') → { trace, voteMaxTokens?, voteTailWindow?, soulRetries?, soulTimeoutMs?, soulIdleTimeoutMs?, innerEvidence?:false, innerRounds?, voteEffort, replayReasoning }
   // （旧键 mergeRounds 已废弃；mergeEffort/ballotTokens/replayReasoningKeep 已随 v1 融合稿/批准票/选票截断退役，残留被忽略；replayReasoning 已恢复为 off/latest 两态）
   ctx.on('trisoul/consensus-config', () => resolveConsensus(), { global: true })
   // 记忆插件在会话首触时查询默认范围档（绑定后不再问）：ctx.bail('trisoul/memory-scope') → 'full'|'project'|'session'

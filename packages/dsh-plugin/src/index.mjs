@@ -76,6 +76,8 @@
 // - 小作业档位：表决(vote) 默认请求 reasoningEffort 'off'（0 思考，省钱提速），
 //   经 smallJobEffort() 能力门控——只有该路由声明了 off 档才传，否则 undefined（提供商默认）。
 //   consensus-config 可配 voteEffort（'off'|'inherit'，默认 'off'）。盲写/独走/收官补一轮继承主请求的档位与 tools
+//   表决/补比评委附带的对话尾窗条数 voteTailWindow（默认 4；0 = 只看候选卡与指令）——09-02 io-audit F3：实测尾 4 条几乎全是
+//   工具结果/状态区/todo、无用户原话，每票 1.4~4.2k tok；用户令改设置可调（settings 层 → 插件 config → 默认）
 // - 灵魂调用的 purpose 统一 `trisoul-draft/<name>` / `trisoul-vote/<name>`：@trisoul/dsh-api 按段归因灵魂用量
 // - 动态灵魂列表：每轮开始 `ctx.bail('trisoul/souls')` 取 @trisoul/dsh-api 的实时列表（名册 A/B/C 按 soulCount 取前几个），
 //   undefined 或可用条目 0 时退回 cordis 静态 souls（静态路径保留逐魂 trisoul/ai-config 覆盖）；1 条 = 单魂模式
@@ -98,6 +100,8 @@ const DEFAULT_TRACE = 'reasoning'
 const TRACE_MODES = new Set(['reasoning', 'text', 'none'])
 /** 选票的输出上限：0 = 不设限（默认；选票就那么长，设上限只会把票截断成弃权/重试）；正数 = 自设上限（重试时按尝试序号放大） */
 const DEFAULT_VOTE_MAX_TOKENS = 0
+/** 表决/补比评委附带看到的对话尾窗条数（tailWindow 往前滚到工具配对完整）；0 = 不带历史。settings 层 voteTailWindow 可调 */
+const DEFAULT_VOTE_TAIL_WINDOW = 4
 /** 单次灵魂调用（draft/vote）超时；Ark 流曾挂起 20 分钟不结束 */
 // 超时两档：idle = 连续多久没有任何流式输出（含 reasoning-delta）就判失联——短任务不受长上限拖累、长输出只要还在吐字就不杀；
 // hard = 单次调用总时长硬上限（兜底防无限输出）。真机反馈：一刀切 120s 会误杀长输出、调大又让短任务挂起太久
@@ -1168,6 +1172,7 @@ function liveConsensusConfig(ctx, config) {
   return {
     trace: pick('trace', v => TRACE_MODES.has(v)) ?? DEFAULT_TRACE,
     voteMaxTokens: pick('voteMaxTokens', nonNegInt) ?? DEFAULT_VOTE_MAX_TOKENS,
+    voteTailWindow: pick('voteTailWindow', nonNegInt) ?? DEFAULT_VOTE_TAIL_WINDOW,
     ballotTool: pick('ballotTool', v => typeof v === 'boolean') ?? true,
     // 超时开关（2026-08-25）：总上限 0 = 不限（callSoul/collect 对 timeoutMs≤0 天然不设 hard 定时器，idle 兜底仍在）
     soulTimeoutMs: pick('soulTimeoutMs', nonNegInt) ?? DEFAULT_SOUL_TIMEOUT_MS,
@@ -2526,7 +2531,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
     const scaleText =
       `Judge this step on its own: is the content correct, does it address the request, does it give prose where prose is due and tool calls where action is due.\n` +
       // B4（2026-08-25）：尺③追加非替换——封皮含金量照旧计入，格名换 findings/plan；
-      // 末句是 plan 的防 Goodhart 边——评委只看 tailWindow(4)+voteEffort off，硬要求「必须有具体 plan」
+      // 末句是 plan 的防 Goodhart 边——评委只看 tailWindow(voteTailWindow，默认 4)+voteEffort off，硬要求「必须有具体 plan」
       // 会直接教出垫料稿；所以只卡「非空就得具体」，空 plan 一律不降档。
       `Whether the distilled envelope (findings/plan/action) is factual and grounded counts too: a draft of boilerplate or missing key points ranks below one with a solid envelope. A non-empty plan must be concrete; an empty plan is not a defect — never rank a draft lower for not writing one.\n` +
       `Never rule out a candidate over style, length, or phrasing; never rule it out because the whole task isn't finished — in a multi-step task, this step only needs to be a correct step.\n`
@@ -2558,7 +2563,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
         tools: useTool ? [ballotToolSchema(m)] : undefined,
         maxTokens: cfg.voteMaxTokens > 0 ? cfg.voteMaxTokens * attempt : undefined,
         reasoningEffort: voteEffort,
-        messages: tailWindow(options.messages, 4),
+        messages: tailWindow(options.messages, cfg.voteTailWindow),
         instruction: mkMsg(`v${round}-${d.soul.name}`,
           (m === 1
             ? `Below is another candidate response to the same request (the only one; your own draft is not among them).\n${ballot.text}\n\n`
@@ -2660,7 +2665,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
         tools: useTool ? [forkToolSchema()] : undefined,
         maxTokens: cfg.voteMaxTokens > 0 ? cfg.voteMaxTokens * attempt : undefined,
         reasoningEffort: effort,
-        messages: tailWindow(options.messages, 4),
+        messages: tailWindow(options.messages, cfg.voteTailWindow),
         instruction: mkMsg(`fork-${d.soul.name}`,
           `Below is another candidate response to the same request, alongside your own draft.\n[The draft]\n${fullCard(chosen)}\n\n[Your own draft]\n${fullCard(d)}\n\n` +
           `One question only: where do you two genuinely fork — a call made differently that would change behavior or output? State each fork as 'mine does X; this one does Y'. Material forks only — not style, wording, or thoroughness. If this draft is simply better across the board, or equivalent to yours, answer with an empty string — never pad.\n` +
