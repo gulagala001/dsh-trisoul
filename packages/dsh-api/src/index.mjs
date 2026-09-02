@@ -10,10 +10,11 @@
 //    画布编排器（不调 LLM）通过 `trisoul/canvas` 事件上报手术次数。
 // 3. HTTP 路由（/trisoul/api/*，走 ctx.webServer；/api 前缀归官方 apiProxy 所有，不占用）：
 //    GET  /trisoul/api/state     → 配置 + 解析结果 + 灵魂列表 + 统计 + LLM 目录 + 最近共识轮次摘要 + 评测指标 metrics（面板一次拉齐）
-//    POST /trisoul/api/settings  → { mode?, soulCount?, unified?, fine?, consensus?, memoryScope?, userRetirement? } 合并进用户层；{ reset: true } 清空用户层
+//    POST /trisoul/api/settings  → { mode?, soulCount?, unified?, fine?, consensus?, memoryScope?, userRetirement?, canvas? } 合并进用户层；{ reset: true } 清空用户层
 //    GET  /trisoul/api/consensus → { rounds: [轻量摘要，最新在前] }；?turnId=… → 单轮全文（每魂思考链/两段盲稿/表决理由、tips/独走、定稿）
 // 4. 共识轮次全文：订阅 `trisoul/consensus` 事件（start/draft/vote/tips/solo/done），按 turnId 聚合进内存环形缓冲（最近 ROUNDS_KEEP 轮）。
 import Schema from '@deepseek-ai/schemastery'
+import { appendFileSync } from 'node:fs'
 
 export const name = 'trisoul-api'
 export const inject = ['webServer', 'llm']
@@ -80,7 +81,17 @@ export const SettingsSchema = Schema.object({
   // ⑧ 用户原话退役（2026-08-23，默认关）：开时非最新一条用户消息可入手术区间（canvas 圈区 + surgeon 执法同步放行；
   // 最新一条永不入）。补偿链：约束进状态区恒真区（verbatim 引用）+ 原文按 seq 可回捞。bail trisoul/user-retirement 即刻生效。
   userRetirement: Schema.boolean().default(false),
+  // 压缩频率三值（2026-09-01 档位制）：设置页四档 always/medium/slow/custom 只是客户端语法糖，落盘就是这三个数。
+  // 设置层缺省 = always 档（CANVAS_TUNING_DEFAULTS）；插件裸默认（3/4000/8）只留给无 dsh-api 场景。bail trisoul/canvas-tuning 即刻生效
+  canvas: Schema.object({
+    surgeryCooldownSteps: Schema.number().min(0).step(1), // 连刀冷却步数（0 = 关）
+    minRegionTokens: Schema.number().min(1).step(1),      // 单刀最小材料（真实内容 token）
+    stateEvery: Schema.number().min(1).step(1),           // 状态牌刷新间隔（可提炼事件数）
+  }),
 })
+
+/** 压缩频率三值的设置层缺省 = always 档（09-01 用户圈定：always 3/10000/6、medium 6/20000/10、slow 10/40000/15；档位表在客户端） */
+export const CANVAS_TUNING_DEFAULTS = Object.freeze({ surgeryCooldownSteps: 3, minRegionTokens: 10000, stateEvery: 6 })
 
 /** cordis 层配置：base 默认值（对齐 profile 里各插件的静态 provider/model）。 */
 export const Config = Schema.object({
@@ -126,6 +137,19 @@ export function soulLabel(soul) {
 export function apply(ctx, config = {}) {
   const base = SettingsSchema(config.base ?? {})
   const recentLimit = config.recentLimit ?? 50
+  // ⑦ 结构化事件流（09-01 审计定案）：三通道（consensus/canvas/memory）事件旁挂 jsonl——
+  // 验收与审计直接 jq 这份流，不再考古 debug 日志/内存指标。高频瞬态帧（draft-delta/status）不落；
+  // 写失败警一次后续每次静默重试（旁挂件绝不影响主线）。路径默认与 debug 日志同目录。
+  const journalPath = config.journalPath ?? `${process.env.TRISOUL_DEBUG_DIR || '.'}/trisoul-events.jsonl`
+  let journalWarned = false
+  const journal = (ch, info) => {
+    if (!info || typeof info !== 'object') return
+    // context 帧自 09-01 历史图起落盘（一步一帧非高频；重启后历史可回放）；draft-delta/status 仍是纯瞬态不落
+    if (ch === 'consensus' && (info.phase === 'draft-delta' || info.phase === 'status')) return
+    try { appendFileSync(journalPath, `${JSON.stringify({ ts: Date.now(), ch, ...info })}\n`) } catch (e) {
+      if (!journalWarned) { journalWarned = true; ctx.logger?.warn(`trisoul-api: 事件流写入失败 ${journalPath} ${String(e?.message ?? e)}`) }
+    }
+  }
   let current = base
   let revision = 0
   let scope = null // settings scope（settings 服务缺席时为 null → 只读 base）
@@ -251,6 +275,15 @@ export function apply(ctx, config = {}) {
       ...(c.exemptHostTools?.length ? { exemptHostTools: c.exemptHostTools } : b.exemptHostTools?.length ? { exemptHostTools: b.exemptHostTools } : {}),
     }
   }
+  /** 压缩频率三值（用户层 > base 层 > always 档缺省）；三值独立回落——用户只改一个，另两个仍吃缺省 */
+  function resolveCanvasTuning() {
+    const c = current.canvas ?? {}, b = base.canvas ?? {}
+    return {
+      surgeryCooldownSteps: c.surgeryCooldownSteps ?? b.surgeryCooldownSteps ?? CANVAS_TUNING_DEFAULTS.surgeryCooldownSteps,
+      minRegionTokens: c.minRegionTokens ?? b.minRegionTokens ?? CANVAS_TUNING_DEFAULTS.minRegionTokens,
+      stateEvery: c.stateEvery ?? b.stateEvery ?? CANVAS_TUNING_DEFAULTS.stateEvery,
+    }
+  }
   /** 监控/设置用的 AI 元数据：固定四个 + 名册三魂（含停用的，recent 表要能标注旧调用）。
    *  魂名跨魂数恒定——soul-A 位在魂数变化时归因不断流（历史 stats 键恒定）。 */
   function aiMeta() {
@@ -270,6 +303,7 @@ export function apply(ctx, config = {}) {
       soulCount: soulCountOf(),
       memoryScope: current.memoryScope ?? base.memoryScope ?? 'full',
       userRetirement: (current.userRetirement ?? base.userRetirement) === true,
+      canvas: resolveCanvasTuning(),
       unified: current.unified ?? {},
       fine: current.fine ?? {},
       consensus: resolveConsensus(),
@@ -294,6 +328,8 @@ export function apply(ctx, config = {}) {
   ctx.on('trisoul/memory-scope', () => current.memoryScope ?? base.memoryScope ?? 'full', { global: true })
   // ⑧ 用户原话退役开关（默认关）：canvas 圈区 / surgeon 执法每次动刀前查询，改设置即刻生效
   ctx.on('trisoul/user-retirement', () => (current.userRetirement ?? base.userRetirement) === true, { global: true })
+  // 压缩频率三值（09-01 档位制）：canvas 连刀冷却/圈区门槛/状态牌刷新每步查询，改设置即刻生效；缺省 = always 档
+  ctx.on('trisoul/canvas-tuning', () => resolveCanvasTuning(), { global: true })
   // 共识插件每轮开始查询：ctx.bail('trisoul/souls', sessionId?) → [{ name, title, persona, officer, provider, model, temperature, followMain?, enabled:true }]
   // 只含启用魂（前 soulCount 条）；路由无一可解析时 undefined → 共识插件退回 cordis 静态 souls。sessionId 忽略（会话级绑定已拆）
   ctx.on('trisoul/souls', () => resolveSouls(), { global: true })
@@ -314,7 +350,10 @@ export function apply(ctx, config = {}) {
   // S7（2026-08-31 perf-audit）：全局时间线合并排序按版本缓存——面板 3s 轮询每次全量 concat+sort（≤24×800 条）纯重复计算
   let timelineRev = 0
   let timelineCache = null
-  /** ⑫ 每会话最新一帧盲写请求结构投影（phase:'context'）：sid → { ts, frame, souls }；插入序即最旧序，超额淘汰 */
+  /** ⑫ 每会话盲写请求结构投影历史（phase:'context'）：sid → [{ ts, frame, souls }…] 按时间序，每会话留最近 FRAMES_KEEP 帧
+   *（09-01 历史图：此前只留最新一帧）；Map 插入序即最久没动静序，会话数超额淘汰。最新一帧仍从 /state.contextFrame 走（兼容），
+   *  全量历史走 /trisoul/api/context-frames 按需拉——不塞进 3s 轮询的 /state。 */
+  const FRAMES_KEEP = 300
   const contextFrames = new Map()
   function sessionOf(sid, touch = true) {
     const key = sid === undefined || sid === null || sid === '' ? '?' : String(sid)
@@ -411,6 +450,7 @@ export function apply(ctx, config = {}) {
       cooldowns: 0,             // 同一区间连续失败触发冷却的次数（对齐 canvas failCooldownSteps 判据）
       // A 轻量遮蔽刀（2026-08-21）：同源注入存活旧版 ≥K → pre-step 直接 shadow（无 LLM）
       shadows: { sweeps: 0, versions: 0 },     // 扫次数 / 累计遮蔽的旧版条数
+      probeNotes: { ridden: 0, kept: 0 },      // ⑦ 探针补记：搭刀总数 / 确认写入检查点后消账数（真机验消账修复的标尺）
     },
     // 记忆健康（来自 trisoul/memory 事件 + 手术事件的 sessionId 关联）
     memory: {
@@ -420,6 +460,7 @@ export function apply(ctx, config = {}) {
       digests: { total: 0, ok: 0, added: 0, updated: 0, retired: 0, noJson: 0, truncated: 0 },
       curates: { total: 0, ok: 0, added: 0, updated: 0, retired: 0 },
       injections: { total: 0, memories: 0 },
+      skips: {},   // ⑦ digest/curate 跳过原因聚合 {reason: count}——duplicate-key 涨 = 判重护栏在拦真撞车
     },
     // 思考用量
     reasoning: {
@@ -666,6 +707,7 @@ export function apply(ctx, config = {}) {
   }
   ctx.on('trisoul/consensus', (info) => {
     if (!info || typeof info !== 'object') return
+    journal('consensus', info)
     broadcast(info)   // wireOf 只认 start/draft-delta/status/done，其余相位返回 null 不发
     // 盲写实况快照：只更新轮记录 live 桶（最新一帧），不进 drafts/timeline/metrics——高频幂等帧，done 时清
     if (info.phase === 'draft-delta') {
@@ -678,11 +720,14 @@ export function apply(ctx, config = {}) {
       }
       return
     }
-    // ⑫ 上下文框架：盲写主请求结构投影（每会话只留最新一帧）——不开轮、不进时间线，state ?sessionId= 暴露
+    // ⑫ 上下文框架：盲写主请求结构投影（每会话留最近 FRAMES_KEEP 帧历史）——不开轮、不进时间线；最新帧 state ?sessionId= 暴露
     if (info.phase === 'context') {
       const sid = info.sessionId != null && info.sessionId !== '' ? String(info.sessionId) : '?'
-      contextFrames.delete(sid)
-      contextFrames.set(sid, { ts: info.ts ?? Date.now(), frame: info.frame ?? null, souls: Array.isArray(info.souls) ? info.souls : [] })
+      const list = contextFrames.get(sid) ?? []
+      contextFrames.delete(sid)   // 重插保 Map 插入序 = 最近动静序（超额按最久没动静淘汰）
+      list.push({ ts: info.ts ?? Date.now(), frame: info.frame ?? null, souls: Array.isArray(info.souls) ? info.souls : [] })
+      if (list.length > FRAMES_KEEP) list.splice(0, list.length - FRAMES_KEEP)
+      contextFrames.set(sid, list)
       if (contextFrames.size > SESSIONS_KEEP) { const oldest = contextFrames.keys().next().value; contextFrames.delete(oldest) }
       return
     }
@@ -923,6 +968,7 @@ export function apply(ctx, config = {}) {
   const surgeryRanges = new Map()
   const SURGERY_SESSIONS_KEEP = 200, SURGERY_RANGES_KEEP = 200
   ctx.on('trisoul/canvas', (info) => {
+    journal('canvas', info)
     const phase = (info && typeof info.phase === 'string') ? info.phase : 'surgery'
     if (phase === 'probe') {
       metrics.compaction.probes.total++
@@ -978,6 +1024,8 @@ export function apply(ctx, config = {}) {
     } else if (info?.ok === true) {
       mcp.surgeryOk++
       lastFailedRegion = null
+      if (typeof info.probeNotes === 'number') mcp.probeNotes.ridden += info.probeNotes
+      if (typeof info.probeNotesKept === 'number') mcp.probeNotes.kept += info.probeNotesKept
       // 压后回捞：记下该会话的成功手术区间，等原文回捞事件来对
       if (typeof info.start === 'number' && typeof info.end === 'number') {
         const sid = info.sessionId ?? '?'
@@ -1001,6 +1049,7 @@ export function apply(ctx, config = {}) {
   // 记忆中枢上报（trisoul/memory）：回忆/回捞/消化/整理/注入 → 记忆健康指标；原文回捞与同会话手术区间相交 → 该手术记「回捞过」
   ctx.on('trisoul/memory', (info) => {
     if (!info || typeof info !== 'object') return
+    journal('memory', info)
     const mm = metrics.memory
     if (info.phase === 'recall') {
       if (info.kind === 'raw') {
@@ -1035,10 +1084,14 @@ export function apply(ctx, config = {}) {
         mm.digests.added += info.added ?? 0; mm.digests.updated += info.updated ?? 0; mm.digests.retired += info.retired ?? 0
         if (info.noJson === true) mm.digests.noJson++
         if (info.truncated === true) mm.digests.truncated++
+        for (const [k, v] of Object.entries(info.skipReasons ?? {})) mm.skips[k] = (mm.skips[k] ?? 0) + v
       }
     } else if (info.phase === 'curate') {
       mm.curates.total++
-      if (info.ok === true) { mm.curates.ok++; mm.curates.added += info.added ?? 0; mm.curates.updated += info.updated ?? 0; mm.curates.retired += info.retired ?? 0 }
+      if (info.ok === true) {
+        mm.curates.ok++; mm.curates.added += info.added ?? 0; mm.curates.updated += info.updated ?? 0; mm.curates.retired += info.retired ?? 0
+        for (const [k, v] of Object.entries(info.skipReasons ?? {})) mm.skips[k] = (mm.skips[k] ?? 0) + v
+      }
       // 整理不属于某个会话（分片级）：时间线记到 '?' 桶（全局视图可见），note 带分片与触发方式
       const shardNote = `${info.shard ?? '?'}${info.trigger ? ` · ${info.trigger}` : ''}`
       pushTimeline(info.sessionId, { ts: Date.now(), durationMs: null, id: 'memory', stage: 'curate-result', ok: info.ok === true,
@@ -1124,7 +1177,7 @@ export function apply(ctx, config = {}) {
       // 该会话绑定的记忆范围档（记忆插件 bail；null = 未绑定/插件缺席）；默认档在 config.memoryScope
       memoryScope: b ? memoryScopeOf(b.id) : null,
       // ⑫ 上下文框架：该会话最新一步盲写请求的消息结构投影 + 各魂 cacheReadTokens（缓存命中分界线）；全局视图 null
-      contextFrame: b ? (contextFrames.get(b.id) ?? null) : null,
+      contextFrame: b ? (contextFrames.get(b.id)?.at(-1) ?? null) : null,
       scope: b ? { sessionId: b.id } : { sessionId: null },
       sessions: [...sessions.values()].filter(x => x.rounds.length || x.timeline.length).sort((x, y) => y.lastAt - x.lastAt).map(sessionSummary),
       consensusRounds: (b ? b.rounds : rounds).map(roundSummary),
@@ -1169,6 +1222,7 @@ export function apply(ctx, config = {}) {
           if (body.mode !== undefined) patch.mode = body.mode
           if (body.memoryScope !== undefined) patch.memoryScope = body.memoryScope
           if (body.userRetirement !== undefined) patch.userRetirement = body.userRetirement
+          if (body.canvas !== undefined) patch.canvas = body.canvas
           if (body.soulCount !== undefined) {
             // 1~3 整数；null/字符串/越界都响亮拒绝（schema 对 null 会当缺省回 3，这里先拦）。旧 souls/effort 键不认
             if (!SOUL_COUNTS.includes(body.soulCount)) return json(res, 400, { error: `soulCount 必须是 ${SOUL_COUNTS.join(' / ')}（收到 ${JSON.stringify(body.soulCount)}）` })
@@ -1187,6 +1241,20 @@ export function apply(ctx, config = {}) {
       }
     },
   }), 'trisoul-api: /trisoul/api/settings')
+
+  // 上下文历史图（09-01）：全量帧历史按需拉；监控只在上下文页打开/手动刷新时来取
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact', path: '/trisoul/api/context-frames',
+    handler: async (req, res) => {
+      if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
+      try {
+        const url = new URL(req.url ?? '/', 'http://local')
+        const sid = url.searchParams.get('sessionId')
+        if (!sid) return json(res, 400, { error: 'sessionId required' })
+        json(res, 200, { sessionId: sid, frames: contextFrames.get(sid) ?? [], keep: FRAMES_KEEP })
+      } catch (e) { json(res, 500, { error: String(e) }) }
+    },
+  }), 'trisoul-api: /trisoul/api/context-frames')
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact', path: '/trisoul/api/consensus',

@@ -528,7 +528,8 @@ export function createTodoStore({ runTimeoutMs = RUN_TIMEOUT_MS, checkCmd = unde
         const cmd = e.kind === 'test' && typeof e.cmd === 'string' && e.cmd.trim() ? e.cmd.trim() : null
         // 08-30 P4：cmd 是整段 shell，在盲写期就会真跑——挂链时先过安全门名单，命中整调用拒收零写入
         const blockedBy = cmd ? cmdBlockedBy(cmd) : undefined
-        if (blockedBy) return err(`Rejected: cmd "${cmd}" matches the safety gate's deny pattern (${blockedBy}) — it will not be run; link a command that does not.`)
+        // 拒收文案不带命中的正则源码（09-01 审计 M1 同款）：回传源码 = 递绕过说明书
+        if (blockedBy) return err(`Rejected: cmd "${cmd}" matches the safety gate's deny pattern — it will not be run; link a command that does not.`)
         staged.push({ task: t, kind: e.kind, path: typeof e.path === 'string' && e.path.trim() ? e.path.trim() : null, note: typeof e.note === 'string' && e.note.trim() ? e.note.trim() : null, reason: e.kind === 'text' ? e.reason.trim() : null, cmd })
       }
       const made = []
@@ -563,7 +564,7 @@ export function createTodoStore({ runTimeoutMs = RUN_TIMEOUT_MS, checkCmd = unde
         const real = containedPath(cwd, l.path)
         // 08-30 P4：跑前再问一次安全门（快照恢复的链接可能挂在名单更新之前）——命中不执行，记 FAIL 并在尾巴说明
         const blockedBy = l.cmd ? cmdBlockedBy(l.cmd) : undefined
-        const r = blockedBy ? { ok: false, timedOut: false, out: `Blocked by the safety gate: cmd matches deny pattern (${blockedBy}); not run.` }
+        const r = blockedBy ? { ok: false, timedOut: false, out: 'Blocked by the safety gate: cmd matches deny pattern; not run.' }
           : real ? await runTestLink(l, real, cwd, signal, runTimeoutMs) : { ok: false, timedOut: false, out: `no such file ${l.path}` }
         if (r.aborted) { aborted = true; break }
         l.lastRun = { pass: r.ok, timedOut: Boolean(r.timedOut), tail: (r.out ?? '').slice(-RUN_TAIL_CHARS) }

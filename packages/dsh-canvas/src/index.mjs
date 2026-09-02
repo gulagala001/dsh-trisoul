@@ -22,6 +22,7 @@
 //         P2-1：两个 minRegion 门槛都只计非检查点的新材料——检查点自身不计入，否则门槛永真每步动刀；
 //         旧 minRegionChars 仍认，按 ÷3.5 折成 token) mergeCheckpoints(true；false = 检查点钉死的旧行为，A/B 对照) failCooldownSteps(3，同区间连败按连败次数放大)
 //         surgeryCooldownSteps(3，连刀冷却：手术成功后歇 N 步再动刀——相邻步连刀每刀都砸一次前缀缓存，隔开让区间攒大合并；0 = 关)
+//         minRegionTokens/surgeryCooldownSteps 未显式配置时每次落刀走 ctx.bail('trisoul/canvas-tuning') 档位实时值（09-01 压缩频率档位制；bail 缺席回上述裸默认）
 //   小作业：provider/model（缺省 ark/deepseek-v4-flash；ctx.bail('trisoul/ai-config','canvas') 实时配置优先）
 //           effort('off'|'inherit'，默认 off 经能力门控) jobTimeoutMs(120000)
 //   遮蔽刀：shadowStale(⑦ 默认 0=关；>0 时同源换代注入——状态区/补注——活表面上已换代旧版 ≥N → pre-step 直接 replace 成空 assistant 删除件)
@@ -39,7 +40,7 @@
 import { appendFileSync } from 'node:fs'
 import { createJobRunner } from './job.mjs'
 import { createStateZone } from './state.mjs'
-import { createProber } from './probe.mjs'
+import { createProber, judgeProbe } from './probe.mjs'
 import { surfaceEvents } from './surface.mjs'
 import { contentTextOf } from './render.mjs'
 
@@ -328,10 +329,24 @@ export function createCanvas(ctx, config = {}) {
     thresholdFallbackChars: config.thresholdFallbackChars > 0 ? config.thresholdFallbackChars : DEFAULT_THRESHOLD_FALLBACK_CHARS,
     keepTailEvents: config.keepTailEvents ?? DEFAULT_KEEP_TAIL_EVENTS,     // 最近 N 个 surface 事件是工作区尾部，不动
     minRegionEvents: config.minRegionEvents ?? 3,    // 区间太碎不值得动刀
-    // 区间最小真实内容 token（P1-6）；旧 minRegionChars 仍认（÷3.5 折算）
-    minRegionTokens: config.minRegionTokens > 0 ? config.minRegionTokens : (config.minRegionChars > 0 ? Math.ceil(config.minRegionChars / 3.5) : DEFAULT_MIN_REGION_TOKENS),
     mergeCheckpoints: config.mergeCheckpoints !== false,   // P1-2：检查点直通可合并（false = 钉死旧行为）
   }
+  // 区间最小真实内容 token（P1-6）：插件配置显式给了就定死；旧 minRegionChars 仍认（÷3.5 折算）；
+  // 都没给 = undefined → 每次圈区时走压缩频率档位（tuningOf），bail 缺席回 DEFAULT_MIN_REGION_TOKENS
+  const explicitMinRegionTokens = config.minRegionTokens > 0 ? config.minRegionTokens
+    : (config.minRegionChars > 0 ? Math.ceil(config.minRegionChars / 3.5) : undefined)
+  // 压缩频率三值（09-01 档位制）：dsh-api 设置页 always/medium/slow/custom 落成的 { surgeryCooldownSteps, minRegionTokens, stateEvery }，
+  // 每次落刀/圈区实时查询（改设置即生效，不重启）；dsh-api 缺席（无头/测试场景）→ undefined，回插件裸默认
+  const tuningOf = () => {
+    try { const t = ctx.bail?.('trisoul/canvas-tuning'); return t && typeof t === 'object' ? t : undefined } catch { return undefined }
+  }
+  /** 圈区参数的每步实时版：minRegionTokens 显式配置 > 档位 > 裸默认；userRetirement/digestedRanges 同为 live 值 */
+  const liveRegionOpts = (session) => ({
+    ...regionOpts,
+    minRegionTokens: explicitMinRegionTokens ?? tuningOf()?.minRegionTokens ?? DEFAULT_MIN_REGION_TOKENS,
+    userRetirement: userRetirementOf(),
+    digestedRanges: digestedOf(session),
+  })
   // ⑧ 用户原话退役（默认关）：插件配置显式给了就用它（无头/测试场景）；否则每次圈区时问 dsh-api 的 live 开关
   const userRetirementOf = () => {
     if (config.userRetirement !== undefined) return config.userRetirement === true
@@ -340,7 +355,7 @@ export function createCanvas(ctx, config = {}) {
   const failCooldownSteps = config.failCooldownSteps ?? 3 // 同一区间手术失败后冷却 N 步再试（避免每步白烧一次手术刀）
   // 连刀冷却（2026-08-21 用户拍板）：手术成功后也冷却 N 步——真机 10 刀里 2 组连刀（相邻步连续动刀），
   // 每刀都把检查点之后的整场前缀缓存作废；隔几步再动，区间攒大合并成一刀，少吃原文少砸缓存。0 = 关。
-  const surgeryCooldownSteps = config.surgeryCooldownSteps ?? 3
+  const surgeryCooldownOf = () => config.surgeryCooldownSteps ?? tuningOf()?.surgeryCooldownSteps ?? 3
   // 手术调度状态按会话分表（08-30 S5：此前进程级一份——3081 多会话时 A 的连刀冷却/忙锁/连败计数全落到 B 头上，
   // `${start}-${end}` 裸 key 跨会话撞名连坐）。同包 stateZone/prober 早已按 sessionId 分表，这里补齐。
   const sched = new Map()   // sessionId → { busy, cooldown, lastFailedKey, failStreak }
@@ -349,7 +364,7 @@ export function createCanvas(ctx, config = {}) {
     if (!sc) { sc = { busy: false, cooldown: 0, lastFailedKey: null, failStreak: 0 }; sched.set(sid, sc) }   // failStreak：同一区间连败次数，冷却按它放大
     return sc
   }
-  dbg(`apply: 判据=${config.digested === false ? '仅阈值' : '中枢已消化区间（阈值兜底）'} 保险丝=${regionOpts.thresholdChars > 0 ? `${regionOpts.thresholdChars} 字符` : `窗口×${regionOpts.thresholdRatio}（未知窗口兜底 ${regionOpts.thresholdFallbackChars} 字符）`} keepTail=${regionOpts.keepTailEvents} minRegion=${regionOpts.minRegionEvents}事件/${regionOpts.minRegionTokens}token probe=${config.probe ?? true} state=${config.state ?? true}`)
+  dbg(`apply: 判据=${config.digested === false ? '仅阈值' : '中枢已消化区间（阈值兜底）'} 保险丝=${regionOpts.thresholdChars > 0 ? `${regionOpts.thresholdChars} 字符` : `窗口×${regionOpts.thresholdRatio}（未知窗口兜底 ${regionOpts.thresholdFallbackChars} 字符）`} keepTail=${regionOpts.keepTailEvents} minRegion=${regionOpts.minRegionEvents}事件/${explicitMinRegionTokens ?? '档位'}token probe=${config.probe ?? true} state=${config.state ?? true}`)
   // 上报给 @trisoul/dsh-api 监控；无监听者时静默。phase: 'surgery' | 'state' | 'probe'
   const report = (info) => { try { ctx.emit('trisoul/canvas', info) } catch (e) { dbg(`EMIT-FAIL trisoul/canvas ${String(e?.message ?? e)}`) } }
   const warn = (m) => { dbg(`WARN ${m}`); ctx.logger?.warn(`trisoul-canvas: ${m}`) }
@@ -392,7 +407,7 @@ export function createCanvas(ctx, config = {}) {
       if (sc && !sc.busy && sc.cooldown === 0 && stateZone.degraded(agent.session.id)) {
         warn(`状态区降级（提炼连续失败 ≥ ${stateZone.failLimit}），本步不动刀——先修好状态区再压`)
       } else if (sc && !sc.busy && sc.cooldown === 0) {
-        const region = pickRegion(agent.session, { ...regionOpts, userRetirement: userRetirementOf(), digestedRanges: digestedOf(agent.session) })
+        const region = pickRegion(agent.session, liveRegionOpts(agent.session))
         if (region) {
           sc.busy = true
           const t0 = Date.now()
@@ -406,18 +421,28 @@ export function createCanvas(ctx, config = {}) {
               probeNotes.length ? { probeNotes } : undefined)
             dbg(`手术完成: compactionId=${r?.compactionId} 遮蔽 ${r?.shadowedSeqs?.length} 事件`)
             const checkpointText = typeof r?.summary?.[0]?.text === 'string' ? r.summary[0].text : ''
-            // 终审 F3：消账前核实该行真进了检查点——纪要模型可能无视「原样保留」；只清确实保留的，
-            // 未保留的留队列搭下一刀（否则事实静默丢失：检查点里没有、队列也清了）
+            // 终审 F3：消账前核实事实真进了检查点——只清确实保留的，未保留的留队列搭下一刀
+            //（否则事实静默丢失：检查点里没有、队列也清了）。判据认「事实存活」不认整行逐字（09-01，审计 bug①）：
+            // 补记行是「问 → 答」拼装，纪要模型按第一人称重写后该形态结构上活不下来（真机 490 次逐字消账 0 命中、
+            // 队列只增不减）——拿行尾的期望答案过 judgeProbe（探针判分同款），答案在纪要里即算保留
+            let notesKept = 0
             if (probeNotes.length) {
-              const kept = probeNotes.filter(l => checkpointText.includes(l))
+              const kept = probeNotes.filter(l => {
+                if (checkpointText.includes(l)) return true
+                const i = l.lastIndexOf(' → ')
+                return judgeProbe(i >= 0 ? l.slice(i + 3) : l, checkpointText)
+              })
+              notesKept = kept.length
               if (kept.length) prober.consumeNotes(sid0, kept)
               if (kept.length < probeNotes.length) warn(`探针补记 ${probeNotes.length - kept.length}/${probeNotes.length} 条未见于新检查点，留队列等下一刀`)
             }
-            // checkpointChars：检查点长度，供 D 评测算压缩比（chars → checkpointChars）
+            // checkpointChars：检查点长度，供 D 评测算压缩比（chars → checkpointChars）；
+            // probeNotes/probeNotesKept（⑦ 事件流）：搭车补记数/实际消账数——真机验消账不再 grep 日志
             report({ phase: 'surgery', ...region, ok: true, sessionId: agent.session.id, durationMs: Date.now() - t0, compactionId: r?.compactionId,
+              probeNotes: probeNotes.length, probeNotesKept: notesKept,
               ...(checkpointText ? { checkpointChars: checkpointText.length } : {}) })
             sc.lastFailedKey = null; sc.failStreak = 0
-            sc.cooldown = surgeryCooldownSteps   // 连刀冷却：这刀成功后歇 N 步，让下一刀的区间长大合并
+            sc.cooldown = surgeryCooldownOf()   // 连刀冷却：这刀成功后歇 N 步（落刀时实时读档位），让下一刀的区间长大合并
             // 探针验收：拿手术后的检查点文本答从预压缩稿抽出的事实题；异步跑，失败仅告警
             if (prober.enabled) {
               probeTail = prober.runProbe({
@@ -444,7 +469,7 @@ export function createCanvas(ctx, config = {}) {
 
   return {
     stateZone, prober, runner,
-    pickRegion: (session) => pickRegion(session, { ...regionOpts, userRetirement: userRetirementOf(), digestedRanges: digestedOf(session) }),
+    pickRegion: (session) => pickRegion(session, liveRegionOpts(session)),
     probeDone: () => probeTail,
   }
 }

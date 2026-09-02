@@ -1206,8 +1206,11 @@ export function contextFrameOf(opts) {
   const messages = (Array.isArray(opts?.messages) ? opts.messages : []).map(m => ({
     role: m?.role ?? '?',
     kind: m?.source?.kind ?? null,
+    // id/compactionId（09-01 上下文历史图）：请求消息无 seq（pi-ai 层概念），监控端靠 id 做帧间 diff 框选被吞段、
+    // 靠 compactionId 与手术事件对齐；宿主消息缺 id 时不投该键
+    ...(m?.id !== undefined ? { id: String(m.id) } : {}),
     ...(m?.source?.plugin ? { plugin: m.source.plugin } : {}),
-    ...(m?.source?.compactionId !== undefined ? { checkpoint: true } : {}),
+    ...(m?.source?.compactionId !== undefined ? { checkpoint: true, compactionId: String(m.source.compactionId) } : {}),
     chars: msgChars(m),
   }))
   return {

@@ -46,8 +46,10 @@ export function apply(ctx, config = {}) {
       const hit = patterns.find(re => re.test(cmd))
       if (hit) {
         ctx.logger?.info(`trisoul-guard: 拒绝危险命令 ${cmd.slice(0, 120)}`)
+        // 理由不带命中的正则源码（09-01 审计 M1）：回传源码 = 递绕过说明书——真机病例：拒绝回传 \bshutdown\b
+        // 后模型「rephrase to avoid the literal word」写脚本落盘再执行，绕过成功
         return { kind: 'deny', reason:
-          `TriSoul safety gate denied: the command matches a dangerous pattern (${hit.source}). Irreversible / outbound actions like this need the user's explicit authorization — use a safe alternative, or tell the user plainly that manual approval is required.` }
+          `TriSoul safety gate denied: the command matches a dangerous pattern. Irreversible / outbound actions like this need the user's explicit authorization — use a safe alternative, or tell the user plainly that manual approval is required.` }
       }
     }
     return next()

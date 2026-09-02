@@ -20,7 +20,7 @@
 // 零 dsh 包依赖；持久态只有 storePath 里的 JSON。
 import { appendFileSync } from 'node:fs'
 import {
-  loadStore, persistStore, applyOps, visibleMemories, formatMemoryLine, formatMemoryLineLegacy, isActive, visibleTo, normalizeCap, CAPS,
+  loadStore, persistStore, applyOps, visibleMemories, byTsThenId, formatMemoryLine, formatMemoryLineLegacy, isActive, visibleTo, normalizeCap, CAPS,
   addDigest, lookupDigest, digestedRanges, markCompactable, holdingDigests, getCursor, setCursor, SCOPE_LABEL, SCOPES,
   findById, resolveHead, restoreMemory, hardDeleteMemory, noteUsageAll, emptyUsage, usageSignal,
   projectShard, shardInfo, shardsOf, shardEntries, shardDirty, curateWindow, markCurated, crossCandidates, openingMemories, pinnedMemories,
@@ -37,6 +37,8 @@ export const inject = ['llm', 'agents', 'tools']  // webServer 走 ctx.inject �
 // debug 日志默认写 cwd；评测容器等场景用 TRISOUL_DEBUG_DIR 指到别处（免得混进被评测仓库的 git 工作区）
 const DBG_PATH = `${process.env.TRISOUL_DEBUG_DIR || '.'}/trisoul-memory.debug.log`
 const dbg = (msg) => { try { appendFileSync(DBG_PATH, `${new Date().toISOString()} ${msg}\n`) } catch {} }
+/** ⑦ 事件流（09-01）：跳过清单按原因聚合 {reason: count}，digest/curate 报文共用——判重护栏等真机验收不再靠 grep 日志 */
+const skipReasonsOf = (skipped) => { const o = {}; for (const s of skipped ?? []) o[s.reason] = (o[s.reason] ?? 0) + 1; return o }
 
 // 宪法瘦身（T2 化，2026-08-26 去向表用户亲审）：system 只留身份 + 记什么/不记什么 + 日期纪律 + 拿不准不记；
 // 三层定义迁 OPS_DESC.scope、写入纪律迁 OPS_DESC.ops、条目形态迁 OPS_DESC.text——说明书贴着字段走。
@@ -406,8 +408,11 @@ export function createMemoryHub(ctx, config = {}) {
     try { return JSON.parse(m[0]) } catch { return undefined }
   }
 
+  // 消化 prompt 里的记忆表按创建 ts 旧→新渲染（09-02 缓存审计）：visibleMemories 的 updatedAt 新→旧只用来选条目
+  // （limit 生效时仍取最近更新的 N 条），渲染顺序改为创建序——新增与 update 生成的新行都落在表尾，表的前缀字节
+  // 跨次不变，前缀缓存才有得命中；旧序每次新增/更新都插表头，其后整表作废（三场 110 次消化实测命中 12.8%，改序可命中 92%）。
   const memoryTable = (project, limit, radius) => {
-    const list = visibleMemories(store, project, { limit, ...radius })
+    const list = [...visibleMemories(store, project, { limit, ...radius })].sort(byTsThenId)
     return list.length
       ? list.map(m => `- id=${m.id} | ${m.scope} | key=${m.key} | ${m.text}`).join('\n')
       : '(empty)'
@@ -438,7 +443,7 @@ export function createMemoryHub(ctx, config = {}) {
       const docText = supplementMode === 'renew' && aAct?.supp.doc
         ? `\n\nCurrent task memo document (the session's working-memory view; rewrite rules under workdoc in the output format):\n${aAct.supp.doc}`
         : ''
-      const prompt = `Current project (git root / cwd): ${project}\nToday: ${todayStr()}\n\nExisting memories (visible to this project${contextLimit > 0 ? `, at most ${contextLimit}` : ''}, newest→oldest):\n${memoryTable(project, contextLimit, radius)}` +
+      const prompt = `Current project (git root / cwd): ${project}\nToday: ${todayStr()}\n\nExisting memories (visible to this project${contextLimit > 0 ? `, at most ${contextLimit}` : ''}, oldest→newest):\n${memoryTable(project, contextLimit, radius)}` +
         holdingText + docText +
         `\n\nNew events (seq ${start}..${end}):\n${formatEvents(events)}`
       const t0 = Date.now()
@@ -479,7 +484,7 @@ export function createMemoryHub(ctx, config = {}) {
           dbg(`digest: ops ${JSON.stringify({ added: r.added.map(m => m.text), updated: r.updated.map(m => m.text), retired: r.retired.map(m => m.id), skipped: r.skipped })}`)
         }
         digestReport = { added: r.added.length, updated: r.updated.length, retired: r.retired.length, skipped: r.skipped.length,
-          compactable: parsed.compactable !== false, released, phaseClosed }
+          skipReasons: skipReasonsOf(r.skipped), compactable: parsed.compactable !== false, released, phaseClosed }
         noteTouched(sid, [...r.added, ...r.updated].map(m => m.id))
       }
       report({ phase: 'digest', ok: true, sessionId: sid, project, start, end, events: events.length, truncated: !!truncated,
@@ -489,8 +494,10 @@ export function createMemoryHub(ctx, config = {}) {
       persist()
       digestCount++
       // 触发自判（#1）：消化 ops 命中已有条目、或模型给出 overlap/conflict 信号 → 该项目分片立刻排整理（受最短间隔防抖）
+      // 档位判据（09-01，审计 bug②）：session 档的命中全落会话私有层，整理分片（global/cross/project）够不到——
+      // 排了也只是空转烧一次 LLM（真机 212 次消化 153 处更新 → 41 次 signal 整理全零 ops）；full/project 档照旧
       const sig = parsed?.signals && typeof parsed.signals === 'object' ? parsed.signals : {}
-      if ((digestReport && (digestReport.updated || digestReport.retired)) || sig.overlap === true || sig.conflict === true) {
+      if (radius.cap !== 'session' && ((digestReport && (digestReport.updated || digestReport.retired)) || sig.overlap === true || sig.conflict === true)) {
         scheduleCurate(projectShard(project), 'signal')
       } else if (curateEvery && digestCount % curateEvery === 0) {
         const sh = pickShard(projectShard(project))
@@ -623,7 +630,7 @@ export function createMemoryHub(ctx, config = {}) {
       persist()
       info_(`整理 ${target}：更新 ${r.updated.length} 退役 ${r.retired.length} 新增 ${r.added.length} 跳过 ${r.skipped.length}`)
       report({ phase: 'curate', ok: true, shard: target, project: info.project, trigger, added: r.added.length, updated: r.updated.length, retired: r.retired.length, skipped: r.skipped.length,
-        ops: r.ops, truncated: r.truncated, cursor: { from: window.cursor, next: window.next, total: window.total } })
+        skipReasons: skipReasonsOf(r.skipped), ops: r.ops, truncated: r.truncated, cursor: { from: window.cursor, next: window.next, total: window.total } })
       return { ...r, shard: target, cursor: { from: window.cursor, next: window.next, total: window.total } }
     } catch (e) {
       warn(`整理失败 ${String(e).slice(0, 300)}`)

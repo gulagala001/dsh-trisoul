@@ -25,6 +25,25 @@ window.__ModuleLoader__.load({
 			"project",
 			"session"
 		];
+		/** 压缩频率档位（09-01 用户圈定）：档位只是客户端语法糖，落盘就是三个数；高亮靠对实效三值反查 */
+		const COMPACTION_PRESETS = {
+			always: {
+				surgeryCooldownSteps: 3,
+				minRegionTokens: 1e4,
+				stateEvery: 6
+			},
+			medium: {
+				surgeryCooldownSteps: 6,
+				minRegionTokens: 2e4,
+				stateEvery: 10
+			},
+			slow: {
+				surgeryCooldownSteps: 10,
+				minRegionTokens: 4e4,
+				stateEvery: 15
+			}
+		};
+		const COMPACTION_PRESET_IDS = Object.keys(COMPACTION_PRESETS);
 		/** 中枢 AI（手术刀 / 记忆中枢 / 画布小作业）：固定三个；灵魂是写死名册 */
 		const HUB_AI_IDS = [
 			"surgeon",
@@ -67,8 +86,8 @@ window.__ModuleLoader__.load({
 		var Picker_module_css_default = {
 			"triggerEmpty": "PMN_SG_triggerEmpty",
 			"triggerLabel": "PMN_SG_triggerLabel",
-			"caret": "PMN_SG_caret",
-			"trigger": "PMN_SG_trigger"
+			"trigger": "PMN_SG_trigger",
+			"caret": "PMN_SG_caret"
 		};
 		//#endregion
 		//#region src/client/Picker.tsx
@@ -152,7 +171,7 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region \0dsh-css:/Users/mac/Projects/trisoul/packages/client/settings/src/client/TrisoulSection.module.css.mjs
-		const css$1 = ".zFfKmq_section{color:var(--dsw-alias-label-primary);font:var(--dsw-font-s-14);font-family:var(--dsw-font-family);flex-direction:column;gap:20px;display:flex}.zFfKmq_header{justify-content:space-between;align-items:flex-start;gap:16px;display:flex}.zFfKmq_headerActions{flex:none;gap:8px;display:flex}.zFfKmq_title{font:var(--dsw-font-m-18);color:var(--dsw-alias-label-primary);margin:0 0 4px;font-weight:600}.zFfKmq_intro{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-secondary);margin:0}.zFfKmq_group{flex-direction:column;gap:10px;display:flex}.zFfKmq_groupDimmed{opacity:.55}.zFfKmq_groupLabel{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-secondary);text-transform:none;font-weight:600}.zFfKmq_hint{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary)}.zFfKmq_warn{font:var(--dsw-font-xs-13);color:var(--dsw-alias-state-warn-label);background:var(--dsw-alias-state-warn-tertiary);border-radius:6px;padding:8px 12px}.zFfKmq_modeRow{grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;display:grid}.zFfKmq_modeCard{text-align:left;cursor:pointer;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:inherit;font:inherit;border-radius:8px;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 14px;font-family:inherit;transition:border-color .15s,background-color .15s;display:flex}.zFfKmq_modeCard:hover{background:var(--dsw-alias-interactive-bg-hover)}.zFfKmq_modeCard:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.zFfKmq_modeCardActive{border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2)}.zFfKmq_modeName{font:var(--dsw-font-s-14);color:var(--dsw-alias-label-primary);font-weight:600}.zFfKmq_modeDesc{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary)}.zFfKmq_fieldRow{flex-wrap:wrap;align-items:center;gap:8px 12px;display:flex}.zFfKmq_fieldLabel{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-secondary);min-width:56px}.zFfKmq_hintInline{font:var(--dsw-font-xxxs-11);color:var(--dsw-alias-label-tertiary)}.zFfKmq_inlineLabel{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-secondary);white-space:nowrap;flex:none}.zFfKmq_table{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;flex-direction:column;display:flex;overflow:hidden}.zFfKmq_aiRow{border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);--trisoul-accent:var(--dsw-alias-label-secondary);grid-template-columns:minmax(140px,.6fr) minmax(0,2fr);align-items:center;gap:8px 14px;padding:10px 12px;display:grid}.zFfKmq_aiRow:last-child{border-bottom:none}.zFfKmq_aiRow[data-ai=surgeon]{--trisoul-accent:var(--dsw-alias-brand-primary)}.zFfKmq_aiRow[data-ai=memory]{--trisoul-accent:var(--dsw-alias-label-primary-bluish)}.zFfKmq_aiName{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-primary);align-items:center;gap:8px;min-width:0;display:flex}.zFfKmq_aiDot{background:var(--trisoul-accent);border-radius:50%;flex:none;width:8px;height:8px}.zFfKmq_aiFieldsWrap{flex-wrap:wrap;align-items:center;gap:8px 14px;min-width:0;display:flex}.zFfKmq_aiFields{flex-wrap:wrap;gap:8px;min-width:0;display:flex}.zFfKmq_aiFields>*{min-width:0;max-width:100%}.zFfKmq_aiFieldsDimmed{opacity:.55}.zFfKmq_tempField{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-secondary);align-items:center;gap:8px;min-width:0;display:flex}.zFfKmq_range{min-width:90px;max-width:160px;accent-color:var(--dsw-alias-brand-primary);flex:1}.zFfKmq_tempValue{font-variant-numeric:tabular-nums;text-align:right;min-width:2.2em;color:var(--dsw-alias-label-primary)}.zFfKmq_resolvedList{flex-direction:column;gap:6px;margin:0;padding:0;list-style:none;display:flex}.zFfKmq_resolvedRow{font:var(--dsw-font-xs-13);align-items:center;gap:10px;display:flex}.zFfKmq_resolvedAi{min-width:180px;color:var(--dsw-alias-label-secondary)}.zFfKmq_actions{gap:8px;display:flex}.zFfKmq_statusRow{min-height:20px;font:var(--dsw-font-xs-13)}.zFfKmq_muted{color:var(--dsw-alias-label-tertiary)}.zFfKmq_ok{color:var(--dsw-alias-state-success-primary)}.zFfKmq_error{color:var(--dsw-alias-state-error-primary)}@media (width<=720px){.zFfKmq_aiRow{grid-template-columns:1fr}}@media (prefers-reduced-motion:reduce){.zFfKmq_modeCard{transition:none}}.zFfKmq_roundsRow{align-items:center;gap:6px;display:inline-flex}";
+		const css$1 = ".zFfKmq_section{color:var(--dsw-alias-label-primary);font:var(--dsw-font-s-14);font-family:var(--dsw-font-family);flex-direction:column;gap:20px;display:flex}.zFfKmq_header{justify-content:space-between;align-items:flex-start;gap:16px;display:flex}.zFfKmq_headerActions{flex:none;gap:8px;display:flex}.zFfKmq_title{font:var(--dsw-font-m-18);color:var(--dsw-alias-label-primary);margin:0 0 4px;font-weight:600}.zFfKmq_intro{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-secondary);margin:0}.zFfKmq_group{flex-direction:column;gap:10px;display:flex}.zFfKmq_groupDimmed{opacity:.55}.zFfKmq_groupLabel{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-secondary);text-transform:none;font-weight:600}.zFfKmq_hint{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary)}.zFfKmq_warn{font:var(--dsw-font-xs-13);color:var(--dsw-alias-state-warn-label);background:var(--dsw-alias-state-warn-tertiary);border-radius:6px;padding:8px 12px}.zFfKmq_modeRow{grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;display:grid}.zFfKmq_modeCard{text-align:left;cursor:pointer;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:inherit;font:inherit;border-radius:8px;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 14px;font-family:inherit;transition:border-color .15s,background-color .15s;display:flex}.zFfKmq_modeCard:hover{background:var(--dsw-alias-interactive-bg-hover)}.zFfKmq_modeCard:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.zFfKmq_modeCardActive{border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2)}.zFfKmq_modeName{font:var(--dsw-font-s-14);color:var(--dsw-alias-label-primary);font-weight:600}.zFfKmq_modeDesc{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary)}.zFfKmq_fieldRow{flex-wrap:wrap;align-items:center;gap:8px 12px;display:flex}.zFfKmq_fieldLabel{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-secondary);min-width:56px}.zFfKmq_hintInline{font:var(--dsw-font-xxxs-11);color:var(--dsw-alias-label-tertiary)}.zFfKmq_inlineLabel{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-secondary);white-space:nowrap;flex:none}.zFfKmq_table{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;flex-direction:column;display:flex;overflow:hidden}.zFfKmq_aiRow{border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);--trisoul-accent:var(--dsw-alias-label-secondary);grid-template-columns:minmax(140px,.6fr) minmax(0,2fr);align-items:center;gap:8px 14px;padding:10px 12px;display:grid}.zFfKmq_aiRow:last-child{border-bottom:none}.zFfKmq_aiRow[data-ai=surgeon]{--trisoul-accent:var(--dsw-alias-brand-primary)}.zFfKmq_aiRow[data-ai=memory]{--trisoul-accent:var(--dsw-alias-label-primary-bluish)}.zFfKmq_aiName{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-primary);align-items:center;gap:8px;min-width:0;display:flex}.zFfKmq_aiDot{background:var(--trisoul-accent);border-radius:50%;flex:none;width:8px;height:8px}.zFfKmq_aiFieldsWrap{flex-wrap:wrap;align-items:center;gap:8px 14px;min-width:0;display:flex}.zFfKmq_aiFields{flex-wrap:wrap;gap:8px;min-width:0;display:flex}.zFfKmq_aiFields>*{min-width:0;max-width:100%}.zFfKmq_aiFieldsDimmed{opacity:.55}.zFfKmq_tempField{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-secondary);align-items:center;gap:8px;min-width:0;display:flex}.zFfKmq_range{min-width:90px;max-width:160px;accent-color:var(--dsw-alias-brand-primary);flex:1}.zFfKmq_tempValue{font-variant-numeric:tabular-nums;text-align:right;min-width:2.2em;color:var(--dsw-alias-label-primary)}.zFfKmq_resolvedList{flex-direction:column;gap:6px;margin:0;padding:0;list-style:none;display:flex}.zFfKmq_resolvedRow{font:var(--dsw-font-xs-13);align-items:center;gap:10px;display:flex}.zFfKmq_resolvedAi{min-width:180px;color:var(--dsw-alias-label-secondary)}.zFfKmq_actions{gap:8px;display:flex}.zFfKmq_statusRow{min-height:20px;font:var(--dsw-font-xs-13)}.zFfKmq_muted{color:var(--dsw-alias-label-tertiary)}.zFfKmq_ok{color:var(--dsw-alias-state-success-primary)}.zFfKmq_error{color:var(--dsw-alias-state-error-primary)}@media (width<=720px){.zFfKmq_aiRow{grid-template-columns:1fr}}@media (prefers-reduced-motion:reduce){.zFfKmq_modeCard{transition:none}}.zFfKmq_roundsRow{align-items:center;gap:6px;display:inline-flex}.zFfKmq_numInput{width:96px;font:var(--dsw-font-xs-13);font-family:var(--dsw-font-family);font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:6px;padding:4px 8px}.zFfKmq_numInput:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}";
 		const tagId$1 = "@trisoul/dsh-client-settings/TrisoulSection.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$1) + "]") === null) {
 			const tag = document.createElement("style");
@@ -162,44 +181,45 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var TrisoulSection_module_css_default = {
-			"modeName": "zFfKmq_modeName",
-			"actions": "zFfKmq_actions",
-			"groupDimmed": "zFfKmq_groupDimmed",
-			"fieldLabel": "zFfKmq_fieldLabel",
-			"hintInline": "zFfKmq_hintInline",
-			"fieldRow": "zFfKmq_fieldRow",
-			"range": "zFfKmq_range",
-			"tempValue": "zFfKmq_tempValue",
-			"ok": "zFfKmq_ok",
-			"aiRow": "zFfKmq_aiRow",
-			"error": "zFfKmq_error",
-			"warn": "zFfKmq_warn",
-			"section": "zFfKmq_section",
-			"aiFieldsWrap": "zFfKmq_aiFieldsWrap",
-			"header": "zFfKmq_header",
-			"tempField": "zFfKmq_tempField",
 			"table": "zFfKmq_table",
+			"modeRow": "zFfKmq_modeRow",
+			"aiRow": "zFfKmq_aiRow",
+			"aiFieldsWrap": "zFfKmq_aiFieldsWrap",
+			"title": "zFfKmq_title",
+			"modeCard": "zFfKmq_modeCard",
+			"range": "zFfKmq_range",
+			"resolvedRow": "zFfKmq_resolvedRow",
+			"tempValue": "zFfKmq_tempValue",
+			"hint": "zFfKmq_hint",
+			"group": "zFfKmq_group",
+			"modeDesc": "zFfKmq_modeDesc",
+			"inlineLabel": "zFfKmq_inlineLabel",
+			"statusRow": "zFfKmq_statusRow",
+			"aiName": "zFfKmq_aiName",
+			"fieldLabel": "zFfKmq_fieldLabel",
+			"resolvedAi": "zFfKmq_resolvedAi",
+			"numInput": "zFfKmq_numInput",
+			"roundsRow": "zFfKmq_roundsRow",
+			"warn": "zFfKmq_warn",
+			"modeName": "zFfKmq_modeName",
+			"groupDimmed": "zFfKmq_groupDimmed",
+			"actions": "zFfKmq_actions",
+			"section": "zFfKmq_section",
+			"aiDot": "zFfKmq_aiDot",
+			"ok": "zFfKmq_ok",
+			"resolvedList": "zFfKmq_resolvedList",
+			"error": "zFfKmq_error",
+			"hintInline": "zFfKmq_hintInline",
+			"modeCardActive": "zFfKmq_modeCardActive",
+			"fieldRow": "zFfKmq_fieldRow",
 			"aiFieldsDimmed": "zFfKmq_aiFieldsDimmed",
+			"groupLabel": "zFfKmq_groupLabel",
+			"muted": "zFfKmq_muted",
+			"header": "zFfKmq_header",
 			"headerActions": "zFfKmq_headerActions",
 			"intro": "zFfKmq_intro",
-			"group": "zFfKmq_group",
-			"title": "zFfKmq_title",
-			"modeRow": "zFfKmq_modeRow",
-			"inlineLabel": "zFfKmq_inlineLabel",
-			"resolvedList": "zFfKmq_resolvedList",
-			"resolvedRow": "zFfKmq_resolvedRow",
-			"resolvedAi": "zFfKmq_resolvedAi",
-			"hint": "zFfKmq_hint",
-			"modeCard": "zFfKmq_modeCard",
-			"muted": "zFfKmq_muted",
-			"groupLabel": "zFfKmq_groupLabel",
-			"statusRow": "zFfKmq_statusRow",
-			"modeDesc": "zFfKmq_modeDesc",
-			"aiDot": "zFfKmq_aiDot",
 			"aiFields": "zFfKmq_aiFields",
-			"roundsRow": "zFfKmq_roundsRow",
-			"aiName": "zFfKmq_aiName",
-			"modeCardActive": "zFfKmq_modeCardActive"
+			"tempField": "zFfKmq_tempField"
 		};
 		//#endregion
 		//#region src/client/TrisoulSection.tsx
@@ -230,17 +250,54 @@ window.__ModuleLoader__.load({
 				children: local.toFixed(1)
 			})] });
 		}
-		/** 设置页「TriSoul」分区：统一/精细两模式 + 灵魂数量（1/2/3）+ 中枢 AI（即改即存）+ 共识过程 + 记忆范围。 */
+		/** 即改即存的整数框（缓存与压缩自定义三值）：失焦/回车才提交；非法输入（非整数/越界）回弹当前值不提交 */
+		function NumField({ label, value, min, onCommit }) {
+			const [local, setLocal] = (0, react.useState)(String(value));
+			(0, react.useEffect)(() => {
+				setLocal(String(value));
+			}, [value]);
+			const commit = () => {
+				const n = Number(local);
+				if (!Number.isInteger(n) || n < min) {
+					setLocal(String(value));
+					return;
+				}
+				if (n !== value) onCommit(n);
+			};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+				className: TrisoulSection_module_css_default.tempField,
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					className: TrisoulSection_module_css_default.inlineLabel,
+					children: label
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+					type: "number",
+					min,
+					step: 1,
+					className: TrisoulSection_module_css_default.numInput,
+					"aria-label": label,
+					value: local,
+					onChange: (e) => setLocal(e.target.value),
+					onBlur: commit,
+					onKeyDown: (e) => {
+						if (e.key === "Enter") e.currentTarget.blur();
+					}
+				})]
+			});
+		}
+		/** 设置页「TriSoul」分区：统一/精细两模式 + 灵魂数量（1/2/3）+ 中枢 AI（即改即存）+ 共识过程 + 记忆范围 + 缓存与压缩（压缩频率档位）。 */
 		function TrisoulSection({ t }) {
 			const [config, setConfig] = (0, react.useState)(null);
 			const [directory, setDirectory] = (0, react.useState)([]);
 			const [loadError, setLoadError] = (0, react.useState)(null);
 			const [status, setStatus] = (0, react.useState)({ kind: "idle" });
+			const [metricsLite, setMetricsLite] = (0, react.useState)(null);
+			const [customTuning, setCustomTuning] = (0, react.useState)(false);
 			const load = (0, react.useCallback)(async () => {
 				try {
 					const state = await fetchState();
 					setConfig(state.config);
 					setDirectory(state.directory);
+					setMetricsLite(state.metrics ?? null);
 					setLoadError(null);
 				} catch (e) {
 					setLoadError(e instanceof Error ? e.message : String(e));
@@ -321,12 +378,56 @@ window.__ModuleLoader__.load({
 			const replayReasoning = config.consensus?.replayReasoning ?? "off";
 			const memoryScope = config.memoryScope ?? "full";
 			const userRetirement = config.userRetirement === true;
+			const tuning = config.canvas ?? COMPACTION_PRESETS.always;
+			const activePreset = COMPACTION_PRESET_IDS.find((id) => {
+				const preset = COMPACTION_PRESETS[id];
+				return preset.surgeryCooldownSteps === tuning.surgeryCooldownSteps && preset.minRegionTokens === tuning.minRegionTokens && preset.stateEvery === tuning.stateEvery;
+			}) ?? null;
+			const cacheReadout = (() => {
+				let cache = 0, input = 0;
+				for (const [key, v] of Object.entries(metricsLite?.reasoning?.efforts ?? {})) {
+					if (!key.startsWith("draft")) continue;
+					cache += v.cacheReadTokens ?? 0;
+					input += v.inputTokens ?? 0;
+				}
+				const hit = cache + input > 0 ? `${(cache / (cache + input) * 100).toFixed(1)}%` : t("cache.readout.nodata");
+				const surgeries = metricsLite?.compaction?.surgeries ?? 0;
+				const completed = metricsLite?.consensus?.completed ?? 0;
+				return t("cache.readout", {
+					hit,
+					knife: surgeries > 0 && completed > 0 ? t("cache.readout.knife", { n: (completed / surgeries).toFixed(1) }) : t("cache.readout.noknife")
+				});
+			})();
+			/** 提交前重取最新配置（09-01 审计 #13）：页面只在 mount/save 后取值，期间 settings.yaml 可能被手改——
+			*  拿陈旧 config 展开整组回写会把手改静默退回；以提交时刻的最新值为基，只覆盖本次点击改动的字段 */
+			const freshConfig = async () => {
+				try {
+					const state = await fetchState();
+					setConfig(state.config);
+					setDirectory(state.directory);
+					return state.config;
+				} catch {
+					return config;
+				}
+			};
 			const setFine = (id, patch) => {
-				const current = config.fine?.[id] ?? {};
-				save({ fine: { [id]: {
-					...current,
-					...patch
-				} } });
+				(async () => {
+					const current = (await freshConfig()).fine?.[id] ?? {};
+					await save({ fine: { [id]: {
+						...current,
+						...patch
+					} } });
+				})();
+			};
+			const setUnified = (patch) => {
+				(async () => {
+					const cur = (await freshConfig()).unified ?? {};
+					await save({ unified: {
+						provider: cur.provider ?? "",
+						model: cur.model ?? "",
+						...patch
+					} });
+				})();
 			};
 			const soulLabel = (s) => s.title ? `${t("souls.default.label", { name: s.name })} · ${s.title}` : t("souls.default.label", { name: s.name });
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -420,10 +521,7 @@ window.__ModuleLoader__.load({
 									customLabel: t("pick.custom"),
 									customPrompt: t("pick.custom.prompt", { field: t("field.provider") }),
 									onChange: (v) => {
-										save({ unified: {
-											provider: v ?? "",
-											model: unified.model ?? ""
-										} });
+										setUnified({ provider: v ?? "" });
 									}
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
@@ -437,10 +535,7 @@ window.__ModuleLoader__.load({
 									customLabel: t("pick.custom"),
 									customPrompt: t("pick.custom.prompt", { field: t("field.model") }),
 									onChange: (v) => {
-										save({ unified: {
-											provider: unified.provider ?? "",
-											model: v ?? ""
-										} });
+										setUnified({ model: v ?? "" });
 									}
 								})
 							]
@@ -955,6 +1050,75 @@ window.__ModuleLoader__.load({
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: TrisoulSection_module_css_default.group,
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: TrisoulSection_module_css_default.groupLabel,
+								children: t("cache.title")
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: TrisoulSection_module_css_default.hint,
+								children: t("cache.hint")
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: TrisoulSection_module_css_default.fieldRow,
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
+									className: TrisoulSection_module_css_default.fieldLabel,
+									children: t("cache.freq")
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: TrisoulSection_module_css_default.roundsRow,
+									role: "radiogroup",
+									"aria-label": t("cache.freq"),
+									children: [COMPACTION_PRESET_IDS.map((id) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Pill, {
+										active: activePreset === id && !customTuning,
+										onClick: () => {
+											setCustomTuning(false);
+											if (activePreset !== id) save({ canvas: { ...COMPACTION_PRESETS[id] } });
+										},
+										children: id
+									}, id)), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Pill, {
+										active: activePreset === null || customTuning,
+										onClick: () => setCustomTuning(true),
+										children: t("cache.custom")
+									})]
+								})]
+							}),
+							activePreset === null || customTuning ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: TrisoulSection_module_css_default.fieldRow,
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumField, {
+										label: t("cache.cooldown"),
+										value: tuning.surgeryCooldownSteps,
+										min: 0,
+										onCommit: (v) => {
+											save({ canvas: { surgeryCooldownSteps: v } });
+										}
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumField, {
+										label: t("cache.minRegion"),
+										value: tuning.minRegionTokens,
+										min: 1,
+										onCommit: (v) => {
+											save({ canvas: { minRegionTokens: v } });
+										}
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumField, {
+										label: t("cache.stateEvery"),
+										value: tuning.stateEvery,
+										min: 1,
+										onCommit: (v) => {
+											save({ canvas: { stateEvery: v } });
+										}
+									})
+								]
+							}) : null,
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: TrisoulSection_module_css_default.hint,
+								children: cacheReadout
+							})
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: TrisoulSection_module_css_default.group,
 						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							className: TrisoulSection_module_css_default.groupLabel,
 							children: t("resolved.title")
@@ -1026,11 +1190,11 @@ window.__ModuleLoader__.load({
 		}
 		var ModeSwitch_module_css_default = {
 			"sep": "Rljr8q_sep",
-			"souls": "Rljr8q_souls",
-			"anchor": "Rljr8q_anchor",
 			"pill": "Rljr8q_pill",
+			"model": "Rljr8q_model",
+			"souls": "Rljr8q_souls",
 			"brand": "Rljr8q_brand",
-			"model": "Rljr8q_model"
+			"anchor": "Rljr8q_anchor"
 		};
 		//#endregion
 		//#region src/client/ModeSwitch.tsx
@@ -1242,7 +1406,18 @@ window.__ModuleLoader__.load({
 			"retire.title": "用户原话退役",
 			"retire.hint": "开启后，非最新一条的用户消息可随手术区间被浓缩进检查点（最新一条永不动）。约束由状态区恒真区逐字引用接住，原文随时可按 seq 回捞。默认关闭。",
 			"retire.off": "关（默认）",
-			"retire.on": "开"
+			"retire.on": "开",
+			"cache.title": "缓存与压缩",
+			"cache.hint": "上下文压缩的频率：压得勤，上下文更短；压得慢，缓存命中更高。即改即存。",
+			"cache.freq": "压缩频率",
+			"cache.custom": "自定义",
+			"cache.cooldown": "冷却步数",
+			"cache.minRegion": "单刀最小材料(token)",
+			"cache.stateEvery": "状态牌刷新间隔(事件数)",
+			"cache.readout": "盲写缓存命中 {hit} · {knife}",
+			"cache.readout.knife": "平均每 {n} 轮一刀",
+			"cache.readout.noknife": "尚未动刀",
+			"cache.readout.nodata": "—"
 		};
 		const en = {
 			"nav": "TriSoul",
@@ -1341,7 +1516,18 @@ window.__ModuleLoader__.load({
 			"retire.title": "User-message retirement",
 			"retire.hint": "When on, user messages other than the latest may be condensed into checkpoints along with a surgical region (the latest one is never touched). Constraints are held as verbatim quotes in the pinned-truths zone, and originals remain retrievable by seq. Off by default.",
 			"retire.off": "Off (default)",
-			"retire.on": "On"
+			"retire.on": "On",
+			"cache.title": "Cache & compaction",
+			"cache.hint": "How often the context gets compacted: more often keeps it shorter, less often keeps cache hits higher. Saves immediately.",
+			"cache.freq": "Compaction frequency",
+			"cache.custom": "Custom",
+			"cache.cooldown": "Cooldown steps",
+			"cache.minRegion": "Min material per cut (tokens)",
+			"cache.stateEvery": "State-card refresh interval (events)",
+			"cache.readout": "Draft cache hit {hit} · {knife}",
+			"cache.readout.knife": "one cut every {n} turns on average",
+			"cache.readout.noknife": "no surgery yet",
+			"cache.readout.nodata": "—"
 		};
 		//#endregion
 		//#region src/client/index.ts

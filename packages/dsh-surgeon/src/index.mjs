@@ -46,6 +46,14 @@ export function renderSurfaceEvent(e) {
     const blocks = Array.isArray(d.content) ? d.content : []
     return blocks.filter(b => b?.type === 'text').map(b => b.text ?? '').join('\n')
   }
+  // tool/result：只取结果正文（09-02 审计 F1）。此前整包 JSON.stringify(d)——转义换行/引号 + toolCallId/turn/step
+  // 元数据 + 嵌套壳，官方 tokenizer 实测同一刀 46 条工具结果 29,712 → 8,834 token（整刀原料 −45%）；
+  // 纪要只需语义内容，画布 renderEventText / 记忆 renderEvent 早已取文本，此处对齐。失败结果带 [error] 前缀。
+  if (e?.type === 'tool/result') {
+    const blocks = Array.isArray(d.message?.content) ? d.message.content : []
+    const textOf = (c) => Array.isArray(c) ? c.map(x => (x && typeof x === 'object') ? (x.text ?? '') : String(x ?? '')).join('\n') : typeof c === 'string' ? c : ''
+    return blocks.map(b => b?.type === 'tool-result' ? `${b.isError ? '[error] ' : ''}${textOf(b.content)}` : (b?.type === 'text' ? (b.text ?? '') : '')).join('\n')
+  }
   return JSON.stringify(d)
 }
 

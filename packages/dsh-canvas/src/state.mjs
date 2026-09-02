@@ -26,9 +26,17 @@ Write both zones in English; when pinning a user constraint or decision, quote t
 
 export function createStateZone(ctx, { config = {}, runJob, report, warn, dbg = () => {} }) {
   const enabled = config.state ?? true
-  const every = Math.max(1, config.stateEvery ?? 8)              // 攒够 N 条可提炼事件才跑一次小作业（⑤ 2026-08-23：4→8，降频提炼省小作业调用）
+  // 攒够 N 条可提炼事件才跑一次小作业：插件配置显式给了就定死；否则每次判批走 bail trisoul/canvas-tuning
+  // 实时值（09-01 压缩频率档位制，设置页改档下一批即生效）；bail 缺席（无 dsh-api 场景）回裸默认 8
+  const explicitEvery = config.stateEvery !== undefined ? Math.max(1, config.stateEvery) : undefined
+  const everyOf = () => {
+    if (explicitEvery !== undefined) return explicitEvery
+    let live
+    try { live = ctx.bail?.('trisoul/canvas-tuning')?.stateEvery } catch { live = undefined }
+    return Math.max(1, live ?? 8)
+  }
   // 2026-08-18 用户令：不要任何截断/预算类限制——单次喂入条数 / 恒真条目数 / 单事件字数 / 输出上限默认全部不设，用户显式给正数才生效
-  const batchMax = config.stateBatchMax > 0 ? Math.max(every, config.stateBatchMax) : 0   // 0 = 积压全喂
+  const batchMaxOf = (every) => config.stateBatchMax > 0 ? Math.max(every, config.stateBatchMax) : 0   // 0 = 积压全喂
   const maxPinned = config.statePinnedMax > 0 ? config.statePinnedMax : 0                 // 0 = 不限
   const failCooldown = config.stateFailCooldownSteps ?? 3        // 提炼失败冷却 N 步再试
   // 连续失败到这个数 → 状态区判定为降级，画布停止动刀（0 = 不熔断）。
@@ -163,7 +171,9 @@ export function createStateZone(ctx, { config = {}, runJob, report, warn, dbg = 
       const r = renderEventText(e, { maxChars: eventChars, skipPluginUser: true })
       if (r) fresh.push(r)
     }
+    const every = everyOf()
     if (fresh.length < every) return
+    const batchMax = batchMaxOf(every)
     if (batchMax > 0 && fresh.length > batchMax) fresh = fresh.slice(-batchMax) // 用户自设上限时积压保最新
     const start = fresh[0].seq
     const end = fresh[fresh.length - 1].seq

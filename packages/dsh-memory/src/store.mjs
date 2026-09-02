@@ -236,6 +236,12 @@ export function applyOps(store, ops, { project, source = 'digest', now = Date.no
       else if (sameKey) { skip(op, 'out-of-shard', { id: sameKey.id }); continue }
     }
     if (target && !isActive(target)) target = undefined  // 头部已退役：视为新增
+    // 判重护栏（09-01，审计 B7）：显式目标的 update 改 key、撞上半径内另一条活跃同 key → 响亮拒收——
+    // 此前判重整段包在 if (!target) 里，这条路直通 supersede，真机 16 次撞车、7 组同 key 双活（矛盾事实同批注入）
+    if (target && key !== target.key) {
+      const holder = store.memories.find(m => m.id !== target.id && isActive(m) && m.key === key && visibleTo(m, project, { cap: radius, session }))
+      if (holder) { skip(op, 'duplicate-key', { id: holder.id }); continue }
+    }
     // 层级：op 给了就用；模型 update 时只升不降（project→cross→global 可提升，反向不自动降级）；用户手动编辑可降。
     // normalizeScope 不认 'session'：外界发 scope:'session' 会落回 fallback——session 条目只能由 cap 钳制产生或沿覆盖链继承（target.scope）。
     const askScope = raw.scope ? normalizeScope(raw.scope, target?.scope ?? 'project') : (target?.scope ?? 'project')
@@ -373,7 +379,7 @@ export function normalizeCurateState(raw) {
   const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {})
   return { cursors: obj(raw?.cursors), lastAt: obj(raw?.lastAt) }
 }
-const byTsThenId = (a, b) => ((a.ts ?? 0) - (b.ts ?? 0)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+export const byTsThenId = (a, b) => ((a.ts ?? 0) - (b.ts ?? 0)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 /** 库里当前存在的分片：global / cross（各自有活跃条目才算）+ 每个有活跃条目的项目（子目录旧绑定折入其 git 根项目）。 */
 export function shardsOf(store, cross = undefined) {
   const active = store.memories.filter(isActive)
