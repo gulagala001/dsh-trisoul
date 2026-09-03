@@ -1866,6 +1866,17 @@ async function* consensusBody(ctx, options, staticSouls, config, report, started
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     return `\n\n## Environment\nWorking directory: ${sessionCwd()}\nPlatform: ${process.platform === 'darwin' ? 'macOS (darwin)' : process.platform}\nToday: ${today}`
   }
+  /** 表决/补比的 system 尾块 = 盲写那份原样（2026-09-03 缓存对齐）。
+   *  前缀缓存按「从第 0 个 token 起的位置」比对：vote 少了这段 hint 时，它的 system 只是 draft system 的
+   *  严格前缀（真机 155 字 vs 2801 字），历史那 34k 在两边的偏移量不同 → 一个 token 都对不上，实测 cacheRead=0、
+   *  单票 53,883 全价。补齐后 vote 与 draft 同处一条链，历史段落进命中价（官方 v4 = 1/30）。
+   *  代价是评委 system 里多一段交稿格式说明——与盲写共享缓存几乎不收费，且投票直令在消息最尾、schema 硬锁兜底。
+   *  逐魂缓存：一轮三票 × 重试都取同一份，避免重复算 panel/schema。 */
+  const voteHintCache = new Map()
+  const voteHintFor = (soul, cfg) => {
+    if (!voteHintCache.has(soul.name)) voteHintCache.set(soul.name, soulDraftExtra(soul, cfg).hint)
+    return voteHintCache.get(soul.name)
+  }
   const soulDraftExtra = (soul, cfg) => {
     const panel = panelSchemasFor(soul)
     const door = jsonDoorFor(soul)
@@ -2606,6 +2617,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
         // 评委会拿它去查文件而不是投票（正文空 → 全员弃权），且 tools 在场时 json_schema 锁即失效、还另起一条缓存链。
         // 撤 cast_ballot 前这行由 `tools: [ballotToolSchema(m)]` 顺带担着，撤工具时漏补 = 09-03 真机全员弃权病例。
         tools: [],
+        hint: voteHintFor(d.soul, cfg),   // system 与盲写逐字节一致 → 历史段落落在同一条缓存链上（见 voteHintFor）
         onPayload: ballotLock(d.soul, ballotJsonSchema(m)),
         maxTokens: cfg.voteMaxTokens > 0 ? cfg.voteMaxTokens * attempt : undefined,
         reasoningEffort: voteEffort,
@@ -2709,6 +2721,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
       const effort = await jobEffort(d.soul, cfg.voteEffort)
       const v = await callSoul(ctx, (attempt) => soulOptions(options, d.soul, 'fork', {
         tools: [],   // 同表决：不清空就继承宿主全套工具（见 voteAmong 处注释）
+        hint: voteHintFor(d.soul, cfg),   // 同表决：system 与盲写对齐吃缓存
         onPayload: ballotLock(d.soul, forkJsonSchema()),
         maxTokens: cfg.voteMaxTokens > 0 ? cfg.voteMaxTokens * attempt : undefined,
         reasoningEffort: effort,

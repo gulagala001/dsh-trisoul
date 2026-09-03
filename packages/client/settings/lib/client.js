@@ -85,9 +85,9 @@ window.__ModuleLoader__.load({
 		}
 		var Picker_module_css_default = {
 			"trigger": "PMN_SG_trigger",
+			"caret": "PMN_SG_caret",
 			"triggerLabel": "PMN_SG_triggerLabel",
-			"triggerEmpty": "PMN_SG_triggerEmpty",
-			"caret": "PMN_SG_caret"
+			"triggerEmpty": "PMN_SG_triggerEmpty"
 		};
 		//#endregion
 		//#region src/client/Picker.tsx
@@ -181,45 +181,45 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var TrisoulSection_module_css_default = {
-			"group": "zFfKmq_group",
-			"resolvedList": "zFfKmq_resolvedList",
-			"groupLabel": "zFfKmq_groupLabel",
-			"fieldRow": "zFfKmq_fieldRow",
-			"aiFieldsWrap": "zFfKmq_aiFieldsWrap",
-			"aiFieldsDimmed": "zFfKmq_aiFieldsDimmed",
-			"title": "zFfKmq_title",
-			"aiRow": "zFfKmq_aiRow",
-			"statusRow": "zFfKmq_statusRow",
-			"roundsRow": "zFfKmq_roundsRow",
-			"modeRow": "zFfKmq_modeRow",
-			"warn": "zFfKmq_warn",
-			"aiName": "zFfKmq_aiName",
-			"hint": "zFfKmq_hint",
-			"intro": "zFfKmq_intro",
-			"ok": "zFfKmq_ok",
+			"range": "zFfKmq_range",
+			"header": "zFfKmq_header",
 			"headerActions": "zFfKmq_headerActions",
-			"inlineLabel": "zFfKmq_inlineLabel",
-			"tempValue": "zFfKmq_tempValue",
-			"fieldLabel": "zFfKmq_fieldLabel",
-			"groupDimmed": "zFfKmq_groupDimmed",
-			"section": "zFfKmq_section",
-			"aiDot": "zFfKmq_aiDot",
-			"resolvedAi": "zFfKmq_resolvedAi",
-			"modeName": "zFfKmq_modeName",
+			"aiFieldsWrap": "zFfKmq_aiFieldsWrap",
 			"tempField": "zFfKmq_tempField",
+			"section": "zFfKmq_section",
+			"inlineLabel": "zFfKmq_inlineLabel",
+			"resolvedRow": "zFfKmq_resolvedRow",
+			"aiName": "zFfKmq_aiName",
+			"modeName": "zFfKmq_modeName",
 			"actions": "zFfKmq_actions",
+			"statusRow": "zFfKmq_statusRow",
+			"modeCardActive": "zFfKmq_modeCardActive",
+			"hint": "zFfKmq_hint",
+			"groupLabel": "zFfKmq_groupLabel",
+			"muted": "zFfKmq_muted",
 			"error": "zFfKmq_error",
 			"numInput": "zFfKmq_numInput",
-			"muted": "zFfKmq_muted",
-			"modeDesc": "zFfKmq_modeDesc",
-			"resolvedRow": "zFfKmq_resolvedRow",
-			"header": "zFfKmq_header",
-			"table": "zFfKmq_table",
-			"modeCardActive": "zFfKmq_modeCardActive",
-			"modeCard": "zFfKmq_modeCard",
-			"range": "zFfKmq_range",
+			"group": "zFfKmq_group",
+			"fieldRow": "zFfKmq_fieldRow",
+			"title": "zFfKmq_title",
+			"hintInline": "zFfKmq_hintInline",
+			"groupDimmed": "zFfKmq_groupDimmed",
+			"aiFieldsDimmed": "zFfKmq_aiFieldsDimmed",
 			"aiFields": "zFfKmq_aiFields",
-			"hintInline": "zFfKmq_hintInline"
+			"table": "zFfKmq_table",
+			"fieldLabel": "zFfKmq_fieldLabel",
+			"modeRow": "zFfKmq_modeRow",
+			"modeCard": "zFfKmq_modeCard",
+			"resolvedAi": "zFfKmq_resolvedAi",
+			"warn": "zFfKmq_warn",
+			"aiDot": "zFfKmq_aiDot",
+			"intro": "zFfKmq_intro",
+			"aiRow": "zFfKmq_aiRow",
+			"ok": "zFfKmq_ok",
+			"tempValue": "zFfKmq_tempValue",
+			"resolvedList": "zFfKmq_resolvedList",
+			"roundsRow": "zFfKmq_roundsRow",
+			"modeDesc": "zFfKmq_modeDesc"
 		};
 		//#endregion
 		//#region src/client/TrisoulSection.tsx
@@ -1278,12 +1278,12 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var ModeSwitch_module_css_default = {
-			"brand": "Rljr8q_brand",
-			"sep": "Rljr8q_sep",
-			"souls": "Rljr8q_souls",
 			"model": "Rljr8q_model",
+			"souls": "Rljr8q_souls",
+			"anchor": "Rljr8q_anchor",
 			"pill": "Rljr8q_pill",
-			"anchor": "Rljr8q_anchor"
+			"brand": "Rljr8q_brand",
+			"sep": "Rljr8q_sep"
 		};
 		//#endregion
 		//#region src/client/ModeSwitch.tsx
