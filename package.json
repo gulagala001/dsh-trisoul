@@ -1,6 +1,6 @@
 {
   "name": "dsh-trisoul",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": false,
   "description": "TriSoul —— 三魂共识 Agent，DeepSeek Harness 插件套件（一键安装 / 独立端口 / 一键卸载）",
   "type": "module",

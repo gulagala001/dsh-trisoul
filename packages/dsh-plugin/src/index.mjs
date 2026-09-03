@@ -2602,6 +2602,10 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
       }
       const submit = `Print JSON only: {"pick": ${m === 1 ? '1 or 0' : '<candidate number>'}, "divergence": "as described above, empty string if none"} (pick is a bare number — not "candidate 2")`
       return callSoul(ctx, (attempt) => soulOptions(options, d.soul, 'vote', {
+        // 面板必须显式清空：soulOptions 展开主请求 options，不覆盖就继承宿主全套工具（bash/read/…）——
+        // 评委会拿它去查文件而不是投票（正文空 → 全员弃权），且 tools 在场时 json_schema 锁即失效、还另起一条缓存链。
+        // 撤 cast_ballot 前这行由 `tools: [ballotToolSchema(m)]` 顺带担着，撤工具时漏补 = 09-03 真机全员弃权病例。
+        tools: [],
         onPayload: ballotLock(d.soul, ballotJsonSchema(m)),
         maxTokens: cfg.voteMaxTokens > 0 ? cfg.voteMaxTokens * attempt : undefined,
         reasoningEffort: voteEffort,
@@ -2704,6 +2708,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
     try {
       const effort = await jobEffort(d.soul, cfg.voteEffort)
       const v = await callSoul(ctx, (attempt) => soulOptions(options, d.soul, 'fork', {
+        tools: [],   // 同表决：不清空就继承宿主全套工具（见 voteAmong 处注释）
         onPayload: ballotLock(d.soul, forkJsonSchema()),
         maxTokens: cfg.voteMaxTokens > 0 ? cfg.voteMaxTokens * attempt : undefined,
         reasoningEffort: effort,
