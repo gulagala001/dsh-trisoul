@@ -44,7 +44,7 @@ export const REPLAY_REASONS = Object.freeze(['off', 'latest'])
 const ConsensusSchema = Schema.object({
   trace: Schema.union(TRACE_MODES).default('reasoning'),
   voteMaxTokens: Schema.number().min(0).step(1),   // 0 = 不设限（默认）；08-30 撤 max(8000)（用户令 16000 填不进设置页；上限类默认不设限）
-  voteTailWindow: Schema.number().min(0).step(1),  // 表决/补比评委附带的对话尾窗条数（0 = 只看候选卡与指令；插件默认 4）——09-02 io-audit F3 用户令改可调
+  voteTailWindow: Schema.number().min(0).step(1),  // 表决/补比评委附带的对话尾窗条数（0 = 只看候选卡与指令；插件默认全量 999999）——09-02 用户令改可调，09-03 默认改全量
   soulRetries: Schema.number().min(0).max(5).step(1), // 灵魂调用失败自动重试次数（0=关；插件默认 2）
   soulTimeoutMs: Schema.number().min(0).step(1), // 单魂一次调用（盲写/表决）总时长硬上限 ms（0 = 不限，靠 idle 兜底；插件默认 900000 = 15 分钟）
   soulIdleTimeoutMs: Schema.number().min(1000).step(1), // 连续无流式输出判失联 ms（插件默认 60000；无 0 档——总上限不限时它是防挂死的最后防线）
@@ -63,6 +63,7 @@ const ConsensusSchema = Schema.object({
   statusHeartbeatMs: Schema.number().min(0).step(1), // 表决/补枪/收官期 status 心跳 ms（插件默认 5000；0 = 关）
   // 已摘死键（2026-08-30 格式锁按协议）：jsonSchemaProviders / jsonObjectProviders——渠道名白名单退役，锁按协议（trisoul/provider-api）；残留键静默忽略
   exemptHostTools: Schema.array(String), // 内层豁免宿主工具（插件默认空；恢复 recall 取证 = ['trisoul_recall']）
+  schemaPromptProviders: Schema.array(String), // 格式锁说明进提示词的渠道 id（json_schema 只约束解码不给模型看 schema 的渠道，如百炼；插件默认空）
   // 已摘死键（v2，2026-08-22）：mergeEffort/ballotTokens/replayReasoningKeep——
   // 融合稿、批准票、选票截断随 v1 共识退役；schema 不再声明，
   // 用户 settings.yaml 残留这些键会被静默忽略（不报错、不下发插件）。
@@ -275,6 +276,7 @@ export function apply(ctx, config = {}) {
       ...(c.statusHeartbeatMs ?? b.statusHeartbeatMs) !== undefined ? { statusHeartbeatMs: c.statusHeartbeatMs ?? b.statusHeartbeatMs } : {},
       // 数组两枚：schema 对缺键物化 []，与「用户显式空数组」不可区分——非空才下发，空 = 回落下一层（base → 插件默认）
       ...(c.exemptHostTools?.length ? { exemptHostTools: c.exemptHostTools } : b.exemptHostTools?.length ? { exemptHostTools: b.exemptHostTools } : {}),
+      ...(c.schemaPromptProviders?.length ? { schemaPromptProviders: c.schemaPromptProviders } : b.schemaPromptProviders?.length ? { schemaPromptProviders: b.schemaPromptProviders } : {}),
     }
   }
   /** 压缩频率三值（用户层 > base 层 > always 档缺省）；三值独立回落——用户只改一个，另两个仍吃缺省 */
@@ -323,7 +325,7 @@ export function apply(ctx, config = {}) {
   ctx.on('trisoul/ai-config', (id) => (
     (HUB_AI_IDS.includes(id) || (typeof id === 'string' && id.startsWith('soul-'))) ? resolveAi(id) : undefined
   ), { global: true })
-  // 共识插件按轮查询：ctx.bail('trisoul/consensus-config') → { trace, voteMaxTokens?, voteTailWindow?, soulRetries?, soulTimeoutMs?, soulIdleTimeoutMs?, innerEvidence?:false, innerRounds?, voteEffort, replayReasoning }
+  // 共识插件按轮查询：ctx.bail('trisoul/consensus-config') → { trace, voteMaxTokens?, voteTailWindow?, schemaPromptProviders?, soulRetries?, soulTimeoutMs?, soulIdleTimeoutMs?, innerEvidence?:false, innerRounds?, voteEffort, replayReasoning }
   // （旧键 mergeRounds 已废弃；mergeEffort/ballotTokens/replayReasoningKeep 已随 v1 融合稿/批准票/选票截断退役，残留被忽略；replayReasoning 已恢复为 off/latest 两态）
   ctx.on('trisoul/consensus-config', () => resolveConsensus(), { global: true })
   // 记忆插件在会话首触时查询默认范围档（绑定后不再问）：ctx.bail('trisoul/memory-scope') → 'full'|'project'|'session'
@@ -485,10 +487,16 @@ export function apply(ctx, config = {}) {
     return { turns: 0, inflight: 0, results: {}, lastMode: null, lastResult: null, lastRounds: null, lastWinner: null, lastDurationMs: null, lastAt: null, lastVotes: null }
   }
   function freshStat() {
+    // input/output/cache/reasoning/context 一律是 token（llm/stream 的 usage 口径），任何别的量纲都不许往上加。
+    // regionChars/surfaceTotal 是画布专用的压缩账（字符）：09-03 前手术把区间字符累加进 input、表面总量覆盖进 context，
+    // 与画布小作业的真 token 混在同两个字段里——真机 canvas 行「输入 1.17M」里 69% 是区间字符，
+    // 既算不出缓存率也读不出真区间，故拆独立字段。
     return { calls: 0, inflight: 0, errors: 0, input: 0, output: 0, cache: 0, reasoning: 0, context: 0,
+      regionChars: 0, surfaceTotal: null,
       lastCall: null, lastDurationMs: null, lastError: null, lastPurpose: null, provider: null, model: null, stages: {} }
   }
-  /** 整体用量（所有 TriSoul 组件的 LLM 调用合计，纯 token 账）：不从 stats 槽位加总——canvas 槽的 input 被复用装区间字符数。
+  /** 整体用量（所有 TriSoul 组件的 LLM 调用合计，纯 token 账）：仍不从 stats 槽位加总（各槽有自己的生命周期），
+   *  但槽位口径已统一为 token（canvas 的区间字符走 regionChars）。
    *  缓存率 = cache/(cache+input)（usage 口径：inputTokens=未命中，cacheReadTokens=命中），UI 算百分比。 */
   function freshTotals() {
     return { calls: 0, errors: 0, input: 0, output: 0, cache: 0, reasoning: 0 }
@@ -1011,8 +1019,9 @@ export function apply(ctx, config = {}) {
       t.calls++; t.lastCall = Date.now(); t.lastPurpose = 'surgery'
       if (info?.ok === false) { t.errors++; t.lastError = String(info.error ?? '').slice(0, 300) }
       if (typeof info?.durationMs === 'number') t.lastDurationMs = info.durationMs
-      if (typeof info?.chars === 'number') t.input += info.chars
-      if (typeof info?.total === 'number') t.context = info.total
+      // 压缩账走独立字段（字符），绝不碰 input/context——那两个是 token 口径，画布小作业（状态区/探针）也在往里写
+      if (typeof info?.chars === 'number') t.regionChars += info.chars
+      if (typeof info?.total === 'number') t.surfaceTotal = info.total
     }
     // 评测：手术次数/成败、区间字符、压缩比（chars→checkpointChars，事件没带就不计=null 不猜）、失败冷却
     const mcp = metrics.compaction

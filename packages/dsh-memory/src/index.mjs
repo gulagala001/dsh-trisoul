@@ -29,6 +29,9 @@ import { renderEvent, formatEvents, DIGESTIBLE_TYPES } from './events.mjs'
 import { projectKeyOf } from './project.mjs'
 import { createEffortResolver } from './effort.mjs'
 
+/** 子代理会话（宿主 subagent 派生，头带 origin:subagent / delegationDepth>0）：记忆中枢让路——不消化、不注入（用户拍板 2026-09-02） */
+const isDelegatedSession = (session) => { const h = session?.header; return !!h && (h.origin === 'subagent' || (Number(h.delegationDepth) || 0) > 0) }
+
 export const name = 'trisoul-memory'
 /** 空稿占位文本（P1-7）：消化批没有实质内容时仍登记区间（可被画布圈压），lookupDigest 不把它当底稿 */
 export const EMPTY_DIGEST_TEXT = '(no substantive content in this span)'
@@ -155,6 +158,19 @@ export function createMemoryHub(ctx, config = {}) {
   const model = config.model ?? 'deepseek-v4-flash'
   /** 静态路由的渠道协议（无头评测 dockerkit 写 api: openai-responses）；只对静态 provider 生效 */
   const staticApi = typeof config.api === 'string' && config.api ? config.api : undefined
+  /** 盲锁渠道（json_schema 只约束解码、description 模型看不见，如百炼）：schema 门之外把散文 Field guide
+   *  也拼进 prompt。与共识插件 cfg.schemaPromptProviders 同一设置项（dsh-api trisoul/consensus-config
+   *  统一下发，设置页一处点亮）；无头没有 dsh-api → 退静态 config.schemaPromptProviders。
+   *  2026-09-03：中枢挪到百炼跑分时暴露——13 个字段语义全住 description，盲锁下等于没给说明。 */
+  const staticSchemaPromptProviders = Array.isArray(config.schemaPromptProviders)
+    ? config.schemaPromptProviders.filter(x => typeof x === 'string')
+    : undefined
+  const schemaPromptProvidersOf = () => {
+    let live
+    try { live = ctx.bail('trisoul/consensus-config')?.schemaPromptProviders } catch { live = undefined }
+    if (Array.isArray(live) && live.length) return live
+    return staticSchemaPromptProviders ?? []
+  }
   // 消化频率：真机反馈「太频繁」——每 3 条事件就跑一次太碎；默认攒 8 条、上限 24 条、闲 90s 冲刷（可配）
   // 2026-08-18 用户令「不要任何截断和预算类限制」：单批上限 / 续传上限 / 注入条数 / 上下文条数 / 事件字数默认全部不设，
   // 只有用户显式给正数才生效（旧默认 24 / 30 / 20 / 30 / 800 会丢事件、丢记忆、把文件内容截成开头）
@@ -375,6 +391,8 @@ export function createMemoryHub(ctx, config = {}) {
     const r = route()
     const api = apiOf(r.provider)
     const locked = !!(schema && LOCK_BY_API[api] === 'schema')
+    // 盲锁渠道：锁照挂（形状仍强制），散文 Field guide 一并进 prompt——否则字段语义模型一个字看不到
+    const blindLock = locked && schemaPromptProvidersOf().includes(r.provider)
     const reasoningEffort = await effortResolver.resolve(r.provider, r.model)
     const stream = ctx.llm.stream({
       ...r,
@@ -387,7 +405,7 @@ export function createMemoryHub(ctx, config = {}) {
       messages: [Object.freeze({
         id: `${purpose}-${Date.now()}`,
         role: 'user',
-        content: Object.freeze([Object.freeze({ type: 'text', text: format && !locked ? `${prompt}\n\n${format}` : prompt })]),
+        content: Object.freeze([Object.freeze({ type: 'text', text: format && (!locked || blindLock) ? `${prompt}\n\n${format}` : prompt })]),
         source: Object.freeze({ kind: 'plugin', plugin: 'trisoul-memory' }),
       })],
     })
@@ -644,7 +662,7 @@ export function createMemoryHub(ctx, config = {}) {
 
   // ---- 订阅事件流（书记官的眼睛）----
   ctx.on('session/event', (session, event) => {
-    if (!event || !DIGESTIBLE_TYPES.includes(event.type)) return
+    if (!event || !DIGESTIBLE_TYPES.includes(event.type) || isDelegatedSession(session)) return
     if (!enqueue(session, event)) return
     dbg(`event: ${event.type} seq=${event.seq} session=${session?.id}`)
     const pend = pending.get(session?.id ?? 'unknown')
@@ -657,6 +675,7 @@ export function createMemoryHub(ctx, config = {}) {
   ctx.on('agent/session-start', (payload) => {
     const agent = payload?.agent ?? payload
     const session = agent?.session
+    if (isDelegatedSession(session)) return
     const sid = session?.id
     const project = projectOf(session)
     // 范围档绑定必须先于 cursor 写入：capOf 靠「cursor 缺席 = 新会话」区分三档上线前的老会话（老会话绑 full）
@@ -857,7 +876,7 @@ export function createMemoryHub(ctx, config = {}) {
       const agent = payload?.agent
       const session = agent?.session
       const sid = session?.id
-      if (!sid || !decision || decision.kind !== 'enter') return decision
+      if (!sid || !decision || decision.kind !== 'enter' || isDelegatedSession(session)) return decision
       const a = activityOf(sid)
       const project = projectOf(session)
       const extra = []

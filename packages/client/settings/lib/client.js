@@ -84,10 +84,10 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var Picker_module_css_default = {
-			"triggerLabel": "PMN_SG_triggerLabel",
-			"caret": "PMN_SG_caret",
 			"trigger": "PMN_SG_trigger",
-			"triggerEmpty": "PMN_SG_triggerEmpty"
+			"triggerLabel": "PMN_SG_triggerLabel",
+			"triggerEmpty": "PMN_SG_triggerEmpty",
+			"caret": "PMN_SG_caret"
 		};
 		//#endregion
 		//#region src/client/Picker.tsx
@@ -181,45 +181,45 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var TrisoulSection_module_css_default = {
+			"group": "zFfKmq_group",
+			"resolvedList": "zFfKmq_resolvedList",
+			"groupLabel": "zFfKmq_groupLabel",
+			"fieldRow": "zFfKmq_fieldRow",
+			"aiFieldsWrap": "zFfKmq_aiFieldsWrap",
+			"aiFieldsDimmed": "zFfKmq_aiFieldsDimmed",
+			"title": "zFfKmq_title",
+			"aiRow": "zFfKmq_aiRow",
+			"statusRow": "zFfKmq_statusRow",
+			"roundsRow": "zFfKmq_roundsRow",
+			"modeRow": "zFfKmq_modeRow",
+			"warn": "zFfKmq_warn",
+			"aiName": "zFfKmq_aiName",
 			"hint": "zFfKmq_hint",
 			"intro": "zFfKmq_intro",
-			"inlineLabel": "zFfKmq_inlineLabel",
-			"header": "zFfKmq_header",
-			"modeDesc": "zFfKmq_modeDesc",
-			"aiDot": "zFfKmq_aiDot",
-			"muted": "zFfKmq_muted",
-			"group": "zFfKmq_group",
-			"title": "zFfKmq_title",
-			"range": "zFfKmq_range",
-			"warn": "zFfKmq_warn",
-			"hintInline": "zFfKmq_hintInline",
-			"tempValue": "zFfKmq_tempValue",
-			"statusRow": "zFfKmq_statusRow",
-			"modeCardActive": "zFfKmq_modeCardActive",
-			"modeName": "zFfKmq_modeName",
-			"aiFieldsDimmed": "zFfKmq_aiFieldsDimmed",
-			"table": "zFfKmq_table",
-			"numInput": "zFfKmq_numInput",
-			"modeRow": "zFfKmq_modeRow",
-			"fieldRow": "zFfKmq_fieldRow",
-			"resolvedRow": "zFfKmq_resolvedRow",
-			"resolvedAi": "zFfKmq_resolvedAi",
-			"section": "zFfKmq_section",
-			"error": "zFfKmq_error",
-			"roundsRow": "zFfKmq_roundsRow",
-			"headerActions": "zFfKmq_headerActions",
-			"aiFields": "zFfKmq_aiFields",
-			"actions": "zFfKmq_actions",
-			"groupDimmed": "zFfKmq_groupDimmed",
-			"aiFieldsWrap": "zFfKmq_aiFieldsWrap",
-			"aiRow": "zFfKmq_aiRow",
-			"groupLabel": "zFfKmq_groupLabel",
-			"resolvedList": "zFfKmq_resolvedList",
-			"tempField": "zFfKmq_tempField",
-			"aiName": "zFfKmq_aiName",
-			"fieldLabel": "zFfKmq_fieldLabel",
 			"ok": "zFfKmq_ok",
-			"modeCard": "zFfKmq_modeCard"
+			"headerActions": "zFfKmq_headerActions",
+			"inlineLabel": "zFfKmq_inlineLabel",
+			"tempValue": "zFfKmq_tempValue",
+			"fieldLabel": "zFfKmq_fieldLabel",
+			"groupDimmed": "zFfKmq_groupDimmed",
+			"section": "zFfKmq_section",
+			"aiDot": "zFfKmq_aiDot",
+			"resolvedAi": "zFfKmq_resolvedAi",
+			"modeName": "zFfKmq_modeName",
+			"tempField": "zFfKmq_tempField",
+			"actions": "zFfKmq_actions",
+			"error": "zFfKmq_error",
+			"numInput": "zFfKmq_numInput",
+			"muted": "zFfKmq_muted",
+			"modeDesc": "zFfKmq_modeDesc",
+			"resolvedRow": "zFfKmq_resolvedRow",
+			"header": "zFfKmq_header",
+			"table": "zFfKmq_table",
+			"modeCardActive": "zFfKmq_modeCardActive",
+			"modeCard": "zFfKmq_modeCard",
+			"range": "zFfKmq_range",
+			"aiFields": "zFfKmq_aiFields",
+			"hintInline": "zFfKmq_hintInline"
 		};
 		//#endregion
 		//#region src/client/TrisoulSection.tsx
@@ -285,6 +285,8 @@ window.__ModuleLoader__.load({
 			});
 		}
 		/** 设置页「TriSoul」分区：统一/精细两模式 + 灵魂数量（1/2/3）+ 中枢 AI（即改即存）+ 共识过程 + 记忆范围 + 缓存与压缩（压缩频率档位）。 */
+		/** 「全部」档：与插件 DEFAULT_VOTE_TAIL_WINDOW 同值——tailWindow 在 messages.length <= n 时原样返回全量历史 */
+		const VOTE_TAIL_ALL = 999999;
 		function TrisoulSection({ t }) {
 			const [config, setConfig] = (0, react.useState)(null);
 			const [directory, setDirectory] = (0, react.useState)([]);
@@ -366,7 +368,8 @@ window.__ModuleLoader__.load({
 			const trace = config.consensus?.trace ?? "reasoning";
 			const voteEffort = config.consensus?.voteEffort ?? "off";
 			const voteMaxTokens = config.consensus?.voteMaxTokens ?? 0;
-			const voteTailWindow = config.consensus?.voteTailWindow ?? 4;
+			const voteTailWindow = config.consensus?.voteTailWindow ?? VOTE_TAIL_ALL;
+			const schemaPromptProviders = config.consensus?.schemaPromptProviders ?? [];
 			const nearIdentical = config.consensus?.nearIdentical !== false;
 			const nearIdenticalSimilarity = config.consensus?.nearIdenticalSimilarity ?? .7;
 			const soulRetries = config.consensus?.soulRetries ?? 2;
@@ -763,6 +766,13 @@ window.__ModuleLoader__.load({
 												},
 												children: n
 											}, n)),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Pill, {
+												active: voteTailWindow >= VOTE_TAIL_ALL,
+												onClick: () => {
+													if (voteTailWindow < VOTE_TAIL_ALL) save({ consensus: { voteTailWindow: VOTE_TAIL_ALL } });
+												},
+												children: t("consensus.voteTail.all")
+											}),
 											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumField, {
 												label: t("pick.custom"),
 												value: voteTailWindow,
@@ -776,6 +786,37 @@ window.__ModuleLoader__.load({
 									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 										className: TrisoulSection_module_css_default.hint,
 										children: t("consensus.voteTail.hint")
+									})
+								]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: TrisoulSection_module_css_default.fieldRow,
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
+										className: TrisoulSection_module_css_default.fieldLabel,
+										children: t("consensus.schemaPrompt")
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: TrisoulSection_module_css_default.roundsRow,
+										role: "group",
+										"aria-label": t("consensus.schemaPrompt"),
+										children: directory.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: TrisoulSection_module_css_default.muted,
+											children: t("consensus.schemaPrompt.none")
+										}) : directory.map((p) => {
+											const on = schemaPromptProviders.includes(p.id);
+											return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Pill, {
+												active: on,
+												onClick: () => {
+													save({ consensus: { schemaPromptProviders: on ? schemaPromptProviders.filter((x) => x !== p.id) : [...schemaPromptProviders, p.id] } });
+												},
+												children: p.name || p.id
+											}, p.id);
+										})
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: TrisoulSection_module_css_default.hint,
+										children: t("consensus.schemaPrompt.hint")
 									})
 								]
 							}),
@@ -1237,12 +1278,12 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var ModeSwitch_module_css_default = {
+			"brand": "Rljr8q_brand",
+			"sep": "Rljr8q_sep",
 			"souls": "Rljr8q_souls",
 			"model": "Rljr8q_model",
-			"brand": "Rljr8q_brand",
-			"anchor": "Rljr8q_anchor",
 			"pill": "Rljr8q_pill",
-			"sep": "Rljr8q_sep"
+			"anchor": "Rljr8q_anchor"
 		};
 		//#endregion
 		//#region src/client/ModeSwitch.tsx
@@ -1419,7 +1460,11 @@ window.__ModuleLoader__.load({
 			"consensus.voteMax.hint": "表决调用的 maxTokens。选票被上限截断时自动放大重试；不限 = 不设上限（默认）",
 			"consensus.voteTail": "表决尾窗",
 			"consensus.voteTail.none": "不带历史",
-			"consensus.voteTail.hint": "评委表决时附带看的对话末尾条数。默认 4；调小省输入，但评委看不到最近的工具结果；不带历史 = 只看候选卡与指令",
+			"consensus.voteTail.all": "全部",
+			"consensus.voteTail.hint": "评委表决时附带看的对话末尾条数。默认全部 = 评委看到的和写稿的三魂一模一样（也让表决蹭上盲写刚写热的缓存）；调小省输入，但评委看不到用户原话、只能比文风；不带历史 = 只看候选卡与指令",
+			"consensus.schemaPrompt": "格式锁说明进提示词",
+			"consensus.schemaPrompt.none": "暂无渠道目录",
+			"consensus.schemaPrompt.hint": "点亮的渠道在 json_schema 锁之外，把整份 schema（四格含义与工具说明）写进系统提示词。百炼这类渠道的 json_schema 只管形状、不把说明给模型看，不点亮模型会盲填、工具参数名靠猜",
 			"consensus.retries": "失败自动重试",
 			"consensus.retries.hint": "灵魂调用失败（断流 / 5xx / 限流 / 无输出超时 / 空响应 / 选票不合格）后再试几次，退避 1s×次数；总时长仍受总上限约束；配置类错误不重试（默认 2，0=关）",
 			"consensus.timeout": "单魂调用总上限",
@@ -1532,7 +1577,11 @@ window.__ModuleLoader__.load({
 			"consensus.voteMax.hint": "maxTokens for vote calls. A ballot truncated by the cap is automatically retried with a larger one; unlimited = no cap (default)",
 			"consensus.voteTail": "Vote tail window",
 			"consensus.voteTail.none": "no history",
-			"consensus.voteTail.hint": "Trailing conversation messages judges see when voting. Default 4; smaller saves input but judges lose the latest tool results; no history = candidates and instructions only",
+			"consensus.voteTail.all": "all",
+			"consensus.voteTail.hint": "Trailing conversation messages judges see when voting. Default all — judges see exactly what the drafters saw (and the vote rides the prefix cache the drafts just warmed); smaller saves input but judges lose the user's own words and can only compare style; no history = candidates and instructions only",
+			"consensus.schemaPrompt": "Schema text in prompt",
+			"consensus.schemaPrompt.none": "no provider directory yet",
+			"consensus.schemaPrompt.hint": "For the highlighted providers the full draft schema (field meanings and tool manual) is also written into the system prompt alongside the json_schema lock. Providers like Bailian enforce json_schema shape only and never show the schema to the model; without this the model fills blindly and guesses tool argument names",
 			"consensus.retries": "Auto retry on failure",
 			"consensus.retries.hint": "How many times a failed soul call (stream error / 5xx / rate limit / idle timeout / empty reply / unparseable ballot) is retried, backoff 1s×attempt, within the same overall cap; config errors are not retried (default 2, 0 = off)",
 			"consensus.timeout": "Per-soul hard time limit",

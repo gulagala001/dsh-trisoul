@@ -76,8 +76,9 @@
 // - 小作业档位：表决(vote) 默认请求 reasoningEffort 'off'（0 思考，省钱提速），
 //   经 smallJobEffort() 能力门控——只有该路由声明了 off 档才传，否则 undefined（提供商默认）。
 //   consensus-config 可配 voteEffort（'off'|'inherit'，默认 'off'）。盲写/独走/收官补一轮继承主请求的档位与 tools
-//   表决/补比评委附带的对话尾窗条数 voteTailWindow（默认 4；0 = 只看候选卡与指令）——09-02 io-audit F3：实测尾 4 条几乎全是
-//   工具结果/状态区/todo、无用户原话，每票 1.4~4.2k tok；用户令改设置可调（settings 层 → 插件 config → 默认）
+//   表决/补比评委附带的对话尾窗条数 voteTailWindow（默认全量；0 = 只看候选卡与指令）——09-02 io-audit F3：尾 4 条
+//   几乎全是工具结果/状态区/todo、抽 118 步 0 步含用户原话，评委不知道用户要什么只能比文风；09-03 用户拍板改默认全量：
+//   评委看到的应与写稿人一模一样，且撤掉 cast_ballot 后全量前缀与盲写逐字节相同、蹭刚写热的缓存（settings 层 → 插件 config → 默认）
 // - 灵魂调用的 purpose 统一 `trisoul-draft/<name>` / `trisoul-vote/<name>`：@trisoul/dsh-api 按段归因灵魂用量
 // - 动态灵魂列表：每轮开始 `ctx.bail('trisoul/souls')` 取 @trisoul/dsh-api 的实时列表（名册 A/B/C 按 soulCount 取前几个），
 //   undefined 或可用条目 0 时退回 cordis 静态 souls（静态路径保留逐魂 trisoul/ai-config 覆盖）；1 条 = 单魂模式
@@ -86,6 +87,8 @@
 //   done.result ∈ {identical, winner, solo, failed, single, all-dead, aborted}；single 双态：mode:'single'=配置态单魂（正常）/ mode:'fallback'=多魂死剩一个（降级）
 //   过程相位 {inner, retry, mend} 只走内存供排查（mend = 缺封皮补枪：draftInfo.mend 同步带 reason/attempts）
 
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { smallJobEffort } from './effort.mjs'
 export { smallJobEffort } from './effort.mjs'
 import { TASK_MAP_TOOL, VERIFY_LINK_TOOL, TODO_TOOL, isTodoSnapshot, todosOf, TODO_NUDGE, TODO_EMPTY_NUDGE, taskMapSchema, verifyLinkSchema, todoToolDefinition, createTodoStore } from './todolist.mjs'
@@ -100,8 +103,11 @@ const DEFAULT_TRACE = 'reasoning'
 const TRACE_MODES = new Set(['reasoning', 'text', 'none'])
 /** 选票的输出上限：0 = 不设限（默认；选票就那么长，设上限只会把票截断成弃权/重试）；正数 = 自设上限（重试时按尝试序号放大） */
 const DEFAULT_VOTE_MAX_TOKENS = 0
-/** 表决/补比评委附带看到的对话尾窗条数（tailWindow 往前滚到工具配对完整）；0 = 不带历史。settings 层 voteTailWindow 可调 */
-const DEFAULT_VOTE_TAIL_WINDOW = 4
+/** 表决/补比评委附带看到的对话尾窗条数（tailWindow 往前滚到工具配对完整）；0 = 不带历史。settings 层 voteTailWindow 可调。
+ *  默认全量（2026-09-03 用户拍板）：评委看到的应与写稿人一模一样——尾 4 条是 08-15 首版的随手取值，
+ *  09-02 审计抽 118 步 0 步含用户原话，评委不知道用户要什么只能比文风；且撤掉 cast_ballot 后全量前缀
+ *  与盲写逐字节相同，蹭的是几十秒前刚写热的那份（百炼实测：schema 不进 prompt、tools 才进）。 */
+const DEFAULT_VOTE_TAIL_WINDOW = 999_999
 /** 单次灵魂调用（draft/vote）超时；Ark 流曾挂起 20 分钟不结束 */
 // 超时两档：idle = 连续多久没有任何流式输出（含 reasoning-delta）就判失联——短任务不受长上限拖累、长输出只要还在吐字就不杀；
 // hard = 单次调用总时长硬上限（兜底防无限输出）。真机反馈：一刀切 120s 会误杀长输出、调大又让短任务挂起太久
@@ -214,6 +220,12 @@ export function ballotToolSchema(m) {
     },
   }
 }
+/** cast_ballot 的 response_format 版：撤空工具面板后形状由协议锁保证（tools 在场时 json_schema 即失效，2026-08-25 实测）。
+ *  09-03 百炼实测：response_format 不进 prompt——换 schema / 改 schema / 不带 schema，prompt_tokens 与 cached_tokens 一个数不变，
+ *  故上锁零缓存代价；而 tools 进 prompt（+305 tok）并自成一条缓存链，撤掉它表决前缀才能与盲写对齐。 */
+export function ballotJsonSchema(m) {
+  return { name: BALLOT_TOOL, strict: true, schema: { ...ballotToolSchema(m).parameters, additionalProperties: false } }
+}
 /** 补比工具（仅三知情票真僵局）：轮换定胜者后，分叉没对准胜者的那个败者对着胜稿再写一次分叉（可空） */
 export const FORK_TOOL = 'state_divergence'
 function forkToolSchema() {
@@ -226,6 +238,10 @@ function forkToolSchema() {
       required: ['divergence'],
     },
   }
+}
+/** state_divergence 的 response_format 版（同 ballotJsonSchema 的理由） */
+export function forkJsonSchema() {
+  return { name: FORK_TOOL, strict: true, schema: { ...forkToolSchema().parameters, additionalProperties: false } }
 }
 /**
  * 盲写交稿工具名。交稿走工具 schema + 缺封皮补枪（2026-08-22 探针定型，实录 scratchpad/probe-*.mjs）：
@@ -639,13 +655,15 @@ export function apply(ctx, config = {}) {
     ctx.on('agent/pre-step', (payload, next) => {
       try {
         const session = payload?.agent?.session
-        if (session) todoStore.maintainInjection(session)
+        if (session && !isDelegatedSession(session)) todoStore.maintainInjection(session)
       } catch (e) { ctx.logger?.warn(`trisoul-consensus: todo 清单注入失败（放行）${String(e?.message ?? e)}`) }
       return next()
     }, { global: true })
   } catch (e) { ctx.logger?.warn(`trisoul-consensus: agent/pre-step 钩子不可用，todo 清单注入停摆 ${String(e?.message ?? e)}`) }
   ctx.on('llm/stream', (options, next) => {
     if (options.purpose || PASSTHROUGH.has(options)) return next()
+    // 子代理会话不跑三魂：交回宿主原生单模型（用户拍板 2026-09-02）
+    if (isDelegatedSession(options.sessionId != null ? ctx.agents?.get?.(options.sessionId)?.session : undefined)) return next()
     turn += 1
     // 独走步：上一步挂账的 tips 未消费 → 本次请求不跑共识，单发胜者魂（消费点在共识体最前）；
     // 取走即消费——独走失败时 tips 已丢弃，同流内回退正常共识步
@@ -1173,7 +1191,6 @@ function liveConsensusConfig(ctx, config) {
     trace: pick('trace', v => TRACE_MODES.has(v)) ?? DEFAULT_TRACE,
     voteMaxTokens: pick('voteMaxTokens', nonNegInt) ?? DEFAULT_VOTE_MAX_TOKENS,
     voteTailWindow: pick('voteTailWindow', nonNegInt) ?? DEFAULT_VOTE_TAIL_WINDOW,
-    ballotTool: pick('ballotTool', v => typeof v === 'boolean') ?? true,
     // 超时开关（2026-08-25）：总上限 0 = 不限（callSoul/collect 对 timeoutMs≤0 天然不设 hard 定时器，idle 兜底仍在）
     soulTimeoutMs: pick('soulTimeoutMs', nonNegInt) ?? DEFAULT_SOUL_TIMEOUT_MS,
     soulIdleTimeoutMs: pick('soulIdleTimeoutMs', posInt) ?? DEFAULT_SOUL_IDLE_TIMEOUT_MS,
@@ -1198,6 +1215,9 @@ function liveConsensusConfig(ctx, config) {
     // 面板豁免宿主工具名单（进内层白名单/evidence 菜单的宿主工具）。默认空 = trisoul_recall 暂时撤出
     // 取证面（2026-08-25 用户令，病例 9bd772f3：recall 变参内环空转）；恢复 = 配置层传 ['trisoul_recall']。
     exemptHostTools: pick('exemptHostTools', v => Array.isArray(v) && v.every(x => typeof x === 'string')) ?? [],
+    // 格式锁说明进提示词的渠道（09-02 百炼病例）：这些渠道的 json_schema 只做解码约束、不把 schema 给模型看（百炼文档「提示词要求：建议明确说明」；
+    // 探针实测 description 里的暗号模型看不见、工具参数名靠猜 query/path 全错）→ schema 门之外把整份 schema 作 json 格式块写进 system
+    schemaPromptProviders: pick('schemaPromptProviders', v => Array.isArray(v) && v.every(x => typeof x === 'string')) ?? [],
   }
 }
 
@@ -1575,6 +1595,14 @@ function fullCard(d) {
  * 时 finally 补发 done{result:'aborted'}，否则监控 inflight 永久 +1。
  * 事件只走内存（ctx.emit），不进正文、不进 session；里面可以带全文（思考链/盲稿/重写稿）。
  */
+/** 子代理会话判定（2026-09-02 用户拍板「子代理就 dsh 原始的 Anchored Standard」）：宿主 subagent 派生的子会话头带
+ *  origin:"subagent" / delegationDepth>0（rc.1 与 0.1.2 同）。这类会话 TriSoul 共识与记忆整体让路——子会话是父层三魂已经
+ *  决定的执行片段，分歧不在这里；它跑父会话继承的预设（原生单模型），report 回到父层照样过表决。画布/手术刀（本部署的
+ *  压缩引擎）与安全门照常服务。 */
+export function isDelegatedSession(session) {
+  const h = session?.header
+  return !!h && (h.origin === 'subagent' || (Number(h.delegationDepth) || 0) > 0)
+}
 /** 会话里最后一条用户原话（source.kind==='user'）的 seq；没有会话/没有用户消息 → null */
 function lastUserSeq(session) {
   const events = Array.isArray(session?.events) ? session.events : null
@@ -1608,9 +1636,14 @@ async function* consensusBody(ctx, options, staticSouls, config, report, started
   const timeout = { timeoutMs: cfg.soulTimeoutMs, idleTimeoutMs: cfg.soulIdleTimeoutMs, reasoningFuseChars: cfg.reasoningFuseChars, textFuseChars: cfg.textFuseChars }
   // 小作业档位：'off' 模式下按该灵魂的路由做能力门控（声明了 off 档才传，否则 undefined = 提供商默认）
   const jobEffort = (soul, mode) => mode === 'off' ? smallJobEffort(ctx, soul.provider, soul.model) : Promise.resolve(undefined)
-  // 结构化选票开关：表决用 cast_ballot 工具；关掉则退回纯文本 JSON。声明必须在 voteAmong 外且先于一切
-  // releaseGated 调用点执行——补比 forkAgainstWinner（voteAmong 外）也引用它（2026-08-31 抽取时的 D2 回归教训）
-  const useTool = cfg.ballotTool !== false
+  // 选票格式锁（2026-09-03 用户拍板「要么强制要么失败」）：表决/补比一律撤空工具面板走 JSON，
+  // 能上锁的协议挂 response_format，协议未知则不挂（软纪律 + parseBallot 兜底）——但绝不回退工具票：
+  // 回退会让表决另起一条缓存链、且把「锁没生效」藏起来。声明必须在 voteAmong 外且先于一切 releaseGated
+  // 调用点执行——补比 forkAgainstWinner（voteAmong 外）也引用它（2026-08-31 抽取时的 D2 回归教训）
+  const ballotLock = (soul, schema) => {
+    const door = jsonDoorFor(soul)
+    return observing(soul, door === 'schema' ? jsonSchemaPayload(schema, soul.api) : door === 'object' ? jsonObjectPayload() : null)
+  }
   // 递增 block index：本流内所有块（旁白 + 重放胜者块）共用一个计数器
   let nextIndex = 0
   const text = function* (s) {
@@ -1804,9 +1837,18 @@ async function* consensusBody(ctx, options, staticSouls, config, report, started
   const jsonModeFor = (soul) => jsonDoorFor(soul) !== null
   /** 探明协议：pi-ai 每次发请求前调 onPayload(params, model)，model.api 就是该渠道协议——记进进程级缓存，下一步起生效。
    *  软路线也挂这只旁观钩子（请求体原样返回）——协议未知的渠道正是靠它上锁。 */
+  /** 诊断开关（09-02 百炼病例）：TRISOUL_PAYLOAD_DUMP=<目录> 时把每次灵魂请求最终 payload 原样落盘（含 onPayload 改写后的锁字段），
+   *  用于离线重放/对照渠道差异。默认不设=零开销；落盘失败静默。 */
+  const dumpDir = process.env.TRISOUL_PAYLOAD_DUMP
+  const dumpPayload = (soul, model, out) => {
+    if (!dumpDir) return
+    try { mkdirSync(dumpDir, { recursive: true }); writeFileSync(join(dumpDir, `${Date.now()}-${soul.name}.json`), JSON.stringify({ provider: soul.provider, api: model?.api, model: model?.id, params: out })) } catch {}
+  }
   const observing = (soul, hook) => (params, model) => {
     if (typeof model?.api === 'string' && model.api && soul.provider) apiOf.seen?.set(soul.provider, model.api)
-    return hook ? hook(params, model) : params
+    const out = hook ? hook(params, model) : params
+    dumpPayload(soul, model, out)
+    return out
   }
   /**
    * 盲写/独走/收官补一轮调用的完整 hint 与工具面（T2 起按渠道分岔）：
@@ -1824,15 +1866,17 @@ async function* consensusBody(ctx, options, staticSouls, config, report, started
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     return `\n\n## Environment\nWorking directory: ${sessionCwd()}\nPlatform: ${process.platform === 'darwin' ? 'macOS (darwin)' : process.platform}\nToday: ${today}`
   }
-  const soulDraftExtra = (soul) => {
+  const soulDraftExtra = (soul, cfg) => {
     const panel = panelSchemasFor(soul)
     const door = jsonDoorFor(soul)
     if (door) {
       // 最小核：system 只剩人设+环境块，每步注入为零（order null）——schema 门字段语义全住 schema description；
-      // object 门 schema 进不了 payload，格式块（jsonFormatBlock）整块进 system
+      // object 门 schema 进不了 payload，格式块（jsonFormatBlock）整块进 system；
+      // schema 门在 cfg.schemaPromptProviders 点名的渠道（百炼类：json_schema 只约束解码、模型看不见 schema）也追加同一格式块
       const schema = draftJsonSchema(actionTools, innerEnabled ? panel : [])
+      const schemaPrompt = Array.isArray(cfg?.schemaPromptProviders) && cfg.schemaPromptProviders.includes(soul.provider)
       return door === 'schema'
-        ? { hint: envBlock(), tools: [], onPayload: observing(soul, jsonSchemaPayload(schema, soul.api)), order: null }
+        ? { hint: (schemaPrompt ? jsonFormatBlock(schema) : '') + envBlock(), tools: [], onPayload: observing(soul, jsonSchemaPayload(schema, soul.api)), order: null }
         : { hint: jsonFormatBlock(schema) + envBlock(), tools: [], onPayload: observing(soul, jsonObjectPayload()), order: null }
     }
     return {
@@ -2271,7 +2315,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
           report({ phase: 'gate', kind: 'unresolved', mode: 'round', bounce: bounces, undone: g.undone, unqualified: g.unqualified, total: g.total, souls: souls.map(s => s.name) })
           const roundT0 = Date.now()
           const rd = await gather(souls, 'draft', 'todo 弹回 ', s =>
-            soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: mkMsg(`todo-round-${bounces}`, todoStore.unresolvedText(session)) }, cfg))
+            soulOptions(options, s, 'draft', { ...soulDraftExtra(s, cfg), instruction: mkMsg(`todo-round-${bounces}`, todoStore.unresolvedText(session)) }, cfg))
           const ra = rd.filter(x => !x.error && !x.truncated)
           yield* narrateRetried(rd, 'todo 弹回 ')
           yield* narrateMended(rd, 'todo 弹回 ')
@@ -2306,7 +2350,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
         report({ phase: 'gate', kind: 'unresolved', bounce: bounces, undone: g.undone, unqualified: g.unqualified, total: g.total, solo: empiric.name })
         const gateT0 = Date.now()
         const [cd] = await gather([empiric], 'draft', 'todo 独走 ', s =>
-          soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: mkMsg(`todo-solo-${bounces}`, todoStore.unqualifiedText(session)) }, cfg))
+          soulOptions(options, s, 'draft', { ...soulDraftExtra(s, cfg), instruction: mkMsg(`todo-solo-${bounces}`, todoStore.unqualifiedText(session)) }, cfg))
         // S8（2026-08-31 perf-audit）：独走是全尺寸盲写调用，收尾补发 done 事件带耗时（监控/metrics 可见，治 t53 黑箱段）
         report({ phase: 'gate', kind: 'unresolved', done: true, bounce: bounces, soul: empiric.name, durationMs: Date.now() - gateT0, ...(cd.error ? { error: cd.error } : {}) })
         if (cd.error) {
@@ -2337,7 +2381,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
       const reviewText = todoStore.textReviewText(session)
       const reviewT0 = Date.now()
       const [cd] = await gather([empiric], 'draft', 'todo 复核 ', s =>
-        soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: mkMsg(`todo-review-${reviews}`, reviewText) }, cfg))
+        soulOptions(options, s, 'draft', { ...soulDraftExtra(s, cfg), instruction: mkMsg(`todo-review-${reviews}`, reviewText) }, cfg))
       // S8：复核收尾同款 done 事件（带耗时）
       report({ phase: 'gate', kind: 'text-review', done: true, bounce: reviews, soul: empiric.name, durationMs: Date.now() - reviewT0, ...(cd.error ? { error: cd.error } : {}) })
       if (cd.error) {
@@ -2384,7 +2428,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
       const soloT0 = Date.now()
       const [d] = await gather([winner], 'draft', '独走 ', s =>
         // ② tips 走请求内末尾 user 直令（instruction 追加在 sanitize 后的消息尾）；system 与普通盲写一致=缓存命中
-        soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: tipsMessage(pending.tips, { framing: pending.framing }) }, cfg))
+        soulOptions(options, s, 'draft', { ...soulDraftExtra(s, cfg), instruction: tipsMessage(pending.tips, { framing: pending.framing }) }, cfg))
       report({ phase: 'solo', winner: winner.name, tips: pending.tips.length, durationMs: Date.now() - soloT0, ...(d.error ? { error: d.error } : {}) })
       if (!d.error) {
         report({ phase: 'draft', round: 1, solo: true, alive: [winner.name], dead: [], drafts: [draftInfo(d)] })
@@ -2422,7 +2466,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
   const emptyNudge = !alignNudge && innerEnabled && agentOf()?.session && souls.some(s => s.officer === 'align')
     ? todoStore.takeEmptyNudge(agentOf().session) : false
   const drafts = await gather(souls, 'draft', '盲写', s => soulOptions(options, s, 'draft', {
-    ...soulDraftExtra(s),
+    ...soulDraftExtra(s, cfg),
     ...(alignNudge && s.officer === 'align' ? { instruction: mkMsg(`todo-nudge-${s.name}`, TODO_NUDGE) } : {}),
     ...(emptyNudge && s.officer === 'align' ? { instruction: mkMsg(`todo-empty-nudge-${s.name}`, TODO_EMPTY_NUDGE) } : {}),
   }, cfg))
@@ -2531,7 +2575,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
     const scaleText =
       `Judge this step on its own: is the content correct, does it address the request, does it give prose where prose is due and tool calls where action is due.\n` +
       // B4（2026-08-25）：尺③追加非替换——封皮含金量照旧计入，格名换 findings/plan；
-      // 末句是 plan 的防 Goodhart 边——评委只看 tailWindow(voteTailWindow，默认 4)+voteEffort off，硬要求「必须有具体 plan」
+      // 末句是 plan 的防 Goodhart 边——评委 voteEffort off（09-03 前还只看尾 4 条），硬要求「必须有具体 plan」
       // 会直接教出垫料稿；所以只卡「非空就得具体」，空 plan 一律不降档。
       `Whether the distilled envelope (findings/plan/action) is factual and grounded counts too: a draft of boilerplate or missing key points ranks below one with a solid envelope. A non-empty plan must be concrete; an empty plan is not a defect — never rank a draft lower for not writing one.\n` +
       `Never rule out a candidate over style, length, or phrasing; never rule it out because the whole task isn't finished — in a multi-step task, this step only needs to be a correct step.\n`
@@ -2556,11 +2600,9 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
         const b = readBallot(v)
         return (b.parsed && !v.truncated) ? undefined : `选票${v.truncated ? '被输出上限截断' : b.via === 'tool' ? '工具参数不合法' : '不含可解析 JSON'}`
       }
-      const submit = useTool
-        ? `Submit via the ${BALLOT_TOOL} tool (${m === 1 ? 'pick=1 to release, pick=0 to withhold' : 'pick is the candidate number, digits only'}; divergence as described above — empty string if none); do not write the ballot in prose. Only if you cannot call the tool, fall back to printing JSON only: {"pick": ${m === 1 ? 1 : 2}, "divergence": ""}`
-        : `Print JSON only: {"pick": ${m === 1 ? '1 or 0' : '<candidate number>'}, "divergence": "as described above, empty string if none"} (pick is a bare number — not "candidate 2")`
+      const submit = `Print JSON only: {"pick": ${m === 1 ? '1 or 0' : '<candidate number>'}, "divergence": "as described above, empty string if none"} (pick is a bare number — not "candidate 2")`
       return callSoul(ctx, (attempt) => soulOptions(options, d.soul, 'vote', {
-        tools: useTool ? [ballotToolSchema(m)] : undefined,
+        onPayload: ballotLock(d.soul, ballotJsonSchema(m)),
         maxTokens: cfg.voteMaxTokens > 0 ? cfg.voteMaxTokens * attempt : undefined,
         reasoningEffort: voteEffort,
         messages: tailWindow(options.messages, cfg.voteTailWindow),
@@ -2571,7 +2613,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
           // 自稿对照区（2026-08-28 表决重设计）：附自己稿只为发现分叉——护栏照旧（不可投、不作评判基准），
           // 用途从「找互补写 salvage」换成「找实质分叉写 divergence」；空 = 干净背书
           `[Your own draft — for comparison only, not votable]\n${ballot.self}\n` +
-          `The draft above is your own: it is not among the candidates, you cannot vote for it, and don't use it as the yardstick to pick faults in the candidates. It has exactly one use — spotting forks: if your draft made a genuinely different call from the candidate you pick (one that would change behavior or output), record it in the ballot's divergence field as ${m === 1 ? "'mine does X; this one does Y'" : "'mine does X; the one I picked does Y'"}; otherwise leave divergence empty.\n\n` +
+          `The draft above is your own: it is not among the candidates, you cannot vote for it, and don't use it as the yardstick to pick faults in the candidates. It has exactly one use — spotting forks: if your draft made a genuinely different call from the candidate you pick (one that would change behavior or output), record it in the ballot's divergence field as ${m === 1 ? "'mine does X; this one does Y'" : "'mine does X; the one I picked does Y'"}. Material forks only — not style, wording, or thoroughness. If ${m === 1 ? 'it is' : 'the candidate you picked is'} simply better across the board, leave it empty — an empty field is a clean endorsement. Never pad it.\n\n` +
           (m === 1
             ? `Answer one question only: can it ship as-is as the reply for this step?\n`
             : `Answer one question only: which one can ship as-is as the reply for this step? Choose exactly 1.\n`) +
@@ -2662,14 +2704,14 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
     try {
       const effort = await jobEffort(d.soul, cfg.voteEffort)
       const v = await callSoul(ctx, (attempt) => soulOptions(options, d.soul, 'fork', {
-        tools: useTool ? [forkToolSchema()] : undefined,
+        onPayload: ballotLock(d.soul, forkJsonSchema()),
         maxTokens: cfg.voteMaxTokens > 0 ? cfg.voteMaxTokens * attempt : undefined,
         reasoningEffort: effort,
         messages: tailWindow(options.messages, cfg.voteTailWindow),
         instruction: mkMsg(`fork-${d.soul.name}`,
           `Below is another candidate response to the same request, alongside your own draft.\n[The draft]\n${fullCard(chosen)}\n\n[Your own draft]\n${fullCard(d)}\n\n` +
           `One question only: where do you two genuinely fork — a call made differently that would change behavior or output? State each fork as 'mine does X; this one does Y'. Material forks only — not style, wording, or thoroughness. If this draft is simply better across the board, or equivalent to yours, answer with an empty string — never pad.\n` +
-          (useTool ? `Submit via the ${FORK_TOOL} tool; do not answer in prose. Only if you cannot call the tool, print JSON only: {"divergence": ""}` : `Print JSON only: {"divergence": ""}`)),
+          `Print JSON only: {"divergence": ""}`),
       }, cfg), timeout, retryOpts('fork', d.soul, { validate: (v) => readFork(v).ok ? undefined : '补比输出不含 divergence' }))
       const r = readFork(v)
       votes[li].divergence = r.divergence; votes[li].refork = true
@@ -2717,7 +2759,7 @@ ${submitFormatBlock(SPAN_SO_FAR)}`))
   // T4：收官补一轮同样是放行前的一段静默等待（用户已经看完稿了却迟迟不结束）
   const stopFinaleBeat = heartbeat('finale', { winner: chosen.soul.name, tips: tips.length })
   const [fd] = await gather([chosen.soul], 'draft', '收官补一轮 ', s =>
-    soulOptions(options, s, 'draft', { ...soulDraftExtra(s), instruction: tipsMessage(tips, { framing }) }, cfg)).finally(stopFinaleBeat)
+    soulOptions(options, s, 'draft', { ...soulDraftExtra(s, cfg), instruction: tipsMessage(tips, { framing }) }, cfg)).finally(stopFinaleBeat)
   report({ phase: 'draft', round: round + 1, finale: true, writer: chosen.soul.name,
     alive: fd.error ? [] : [chosen.soul.name], dead: fd.error ? [chosen.soul.name] : [], drafts: [draftInfo(fd)] })
   if (fd.error) {
